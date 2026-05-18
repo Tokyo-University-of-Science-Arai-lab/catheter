@@ -1,0 +1,18 @@
+joint_order:
+- joint1
+- joint2
+- joint3
+- joint4
+- joint5
+- joint6
+- joint7
+waypoints:
+- name: p0 #認識姿勢
+  q:
+  - -14.9
+  - -88.1
+  - 150.1
+  - 95.3
+  - 78.9
+  - 30.0
+  - -4.6

@@ -1,0 +1,10 @@
+# Goal
+float64 dx
+---
+# Result
+bool success
+string message
+trajectory_msgs/JointTrajectory trajectory
+---
+# Feedback
+float32 progress

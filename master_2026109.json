@@ -1,0 +1,62 @@
+[
+    {
+    "book_name": "独立行政法人",
+    "ISBN_number": "9784535512122",
+    "bookshelf_ID": "1H12-1",
+    "book_shelf_height": ""
+  },
+  {
+    "book_name": "ファイナンシャル・リスクマネージメント",
+    "ISBN_number": "9784254545586",
+    "bookshelf_ID": "1H14-4",
+    "book_shelf_height": ""
+  },
+  {
+    "book_name": "道づくりのソフトサイエンス",
+    "ISBN_number": "9784306023765",
+    "bookshelf_ID": "1H16-7",
+    "book_shelf_height": ""
+  },
+  {
+    "book_name": "講座社会学11",
+    "ISBN_number": "9784130551113",
+    "bookshelf_ID": "1H14-5",
+    "book_shelf_height": ""
+  },
+    {
+    "book_name": "経済学計算問題の楽々攻略法",
+    "ISBN_number": "9784419035655",
+    "bookshelf_ID": "1H12-2",
+    "book_shelf_height": ""
+  },
+    {
+    "book_name": "社会的認知ハンドブック",
+    "ISBN_number": "9784762822254",
+    "bookshelf_ID": "1H14-6",
+    "book_shelf_height": ""
+  },
+  {
+    "book_name": "ドイツ留学案内 大学篇",
+    "ISBN_number": "9784384018660",
+    "bookshelf_ID": "1H12-1",
+    "book_shelf_height": ""
+  },
+    {
+    "book_name": "金融用語の基礎知識",
+    "ISBN_number": "9784478260685",
+    "bookshelf_ID": "1H14-3",
+    "book_shelf_height": ""
+  },
+    {
+    "book_name": "大学生の自己と生き方",
+    "ISBN_number": "9784888486682",
+    "bookshelf_ID": "1H12-1",
+    "book_shelf_height": ""
+  },  
+  {
+    "book_name": "新しい日本銀行その機能と業務",
+    "ISBN_number": "9784641161078",
+    "bookshelf_ID": "1H14-4",
+    "book_shelf_height": ""
+  }
+]

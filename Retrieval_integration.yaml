@@ -1,0 +1,67 @@
+robot:
+  xarm:
+    host: 192.168.2.197
+
+books:
+  master_file: master_20260216.json  #master_20260225_tohan.json
+
+linear_lift:
+  home_mm: 140.0
+  move_to_container: 1100.0
+
+paths:
+  waypoint:
+    init_to_capture: /home/book/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/init_to_capture_v2_integration.yaml
+
+    capture_to_init:
+      right: /home/book/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/capture_to_init_v2_integration.yaml
+      left: /home/book/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/capture_to_init_v2_integration-left.yaml
+
+  capture:
+    bookshelf_barcode: /home/book/pro_book/pro_hand_book_python/captures/bookshelf_barcode
+    
+  log:
+    retrieval: /home/book/pro_book/pro_hand_book_python/logfile/retrieval_log.csv
+
+# ---------------- 通信設定 ----------------
+target_ip: "172.20.10.2"  #"192.168.0.200"
+
+cmd_vel_sender:
+  ros__parameters:
+    tcp_port: 5065
+    topic_name: /cmd_vel
+    decimal_places: 3
+
+error_x_sender:
+  ros__parameters:
+    tcp_port: 5012
+    topic_name: /error_x
+
+shelf_id_sender:
+  ros__parameters:
+    tcp_port: 5000
+    topic_name: /shelf_id
+
+navigation_goal_final_receiver:
+  ros__parameters:
+    tcp_port: 5015
+    topic_name: /navigation_goal_final
+    buffer_size: 1024
+
+navigation_goal_receiver:
+  ros__parameters:
+    tcp_port: 5009
+    topic_name: /navigation_goal
+    buffer_size: 1024
+
+wall_distance_receiver:
+  ros__parameters:
+    tcp_port: 5025
+    topic_name: /wall_distance
+    buffer_size: 1024
+
+wall_yaw_deg_receiver:
+  ros__parameters:
+    tcp_port: 5030
+    topic_name: /wall_yaw_deg
+    buffer_size: 1024
