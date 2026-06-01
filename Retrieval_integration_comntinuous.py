@@ -6,7 +6,7 @@ from pathlib import Path
 from detection.pro_handbook.sam_py_demo.get_book_points_revised import run_capture_and_pca
 from xarm7.control.move_to_container_test import Move_to_Container
 from xarm7.control.shelf_id_manager import ShelfIDManager
-from detection.pro_handbook.sam_py_demo.bar_code.book_barcode import book_barcode_sequence
+from detection.pro_handbook.sam_py_demo.bar_code.book_barcode_test_rightside import book_barcode_sequence
 from detection.pro_handbook.sam_py_demo.bar_code.bookshelf_barcode import bookshelf_barcode_sequence
 from xarm7.control.book_return_sequence import storage_sequence
 from detection.pro_handbook.sam_py_demo.Storage import run_capture_and_pca_depth_space
@@ -366,13 +366,60 @@ def main_sequence(
                 safe_motion(lambda: arm.moveL_post_grasp_left() , monitor, "retreave_left")   #書籍を引き抜く
                 #arm.move_tcp_execute(dx=0.2675, executor=executor)
 
-            time.sleep(1.0)    
-            HandBook_retrieval.open_until_full(HandMotors_retrieval) 
-            time.sleep(1.0)    
-            HandBook_retrieval.grasp(HandMotors_retrieval) 
+            tp.publish_target_mm(config["linear_lift"]["move_to_container"])
 
+            #==========================書籍バーコード認識============================================================
+
+            if height < 900:
+                time.sleep((900-height)*0.0075)
+
+            result = book_barcode_sequence(barcode_number, shot_dir, arm)
+            
+            if result == "success":
+                pass  # そのままコンテナ収納処理へ続く
+            
+            elif result == "no_barcode":
+                #ここに右側動作の行動を呼び出すコードを書く
+                pass
+        
+            elif result == "wrong_barcode":
+                print("barcode NG")
+            
+                storage_sequence(arm, HandBook_storage)
+
+                print(f" バーコード不一致 ")
+                write_log(
+                    config,
+                    book_name,
+                    id,
+                    None,   
+                    None,
+                    side,
+                    height,
+                    "バーコード不一致",
+                    shot_dir,
+                    ""
+                )
+
+                # ===== 認識エラーになった時、アームを初期姿勢に戻す =====s
+                tp.publish_target_mm(config["linear_lift"]["home_mm"])
+                waypoint_node.reset()
+                
+                waypoint_path = config["paths"]["waypoint"]["capture_to_init"][side]
+
+                waypoint_node.play_direct(waypoint_path)
+
+                while rclpy.ok() and not waypoint_node.is_finished():
+                    executor.spin_once(timeout_sec=0.1)
+                done_msg = Bool()
+                done_msg.data = True
+                done_pub.publish(done_msg)
+                rclpy.spin_once(node, timeout_sec=0.1)
+
+                return 0.0
 
     
+
 
         except EOFError:
             #ctrl + D によってその書籍出庫はスキップし初期姿勢に戻る
@@ -425,9 +472,17 @@ def main_sequence(
         rclpy.spin_once(tp, timeout_sec=0.1)
 
        #-----------------------コンテナ収納動作-----------------------------------------
+        try:
+            safe_motion(lambda: Move_to_Container(book_width_offset, arm, waypoint_node, HandMotors_retrieval), monitor, "Move_to_container")  
+        except Exception:
+            print("xArm error during Move_to_Container")
+            os.kill(os.getpid(), signal.SIGINT)
+            
+        print('skip insertion or after insertion')
+        
         waypoint_node.reset()
         waypoint_node.play_direct(
-            config["paths"]["waypoint"]["capture_to_init"][side]
+            "/home/book/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/init.yaml"
         )
 
         wait_start_time = time.time()

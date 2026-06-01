@@ -1,5 +1,5 @@
 id:
-  port: '/dev/book_hand' # linux
+  port: '/dev/ttyUSB0' # linux
   baudrate: 57600
   gripper: 1
   spacer_rot: 2
@@ -7,7 +7,7 @@ id:
 
 pos:
   gripper:
-    close: 3374 # 111
+    close: 331 # 111
     range: 8190 # 4095*2, open: close + range
     release: 4000
     theta_zero: 0.252680 # radian
@@ -15,8 +15,8 @@ pos:
     rad_to_step: 651.8986
     step_to_rad: 0.00153398
     gear_ratio: 20
-    calib_width_a:
-    calib_width_b:
+    calib_width_a: 0.9124
+    calib_width_b: -4.0355
 
 
   spacer_rot:

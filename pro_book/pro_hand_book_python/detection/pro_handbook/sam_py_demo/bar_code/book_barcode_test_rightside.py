@@ -101,7 +101,13 @@ def book_barcode_sequence(barcode_number_input: str, shot_dir: Path, arm: XArm7)
         log_path.write_text(s, encoding="utf-8")
         print("[book barcode] saved:", str(log_path))
 
-        return  True   #bool(barcode_identification)
+        if barcode_identification:
+            return "success"
+        elif not barcode_data_output:
+            return "no_barcode"
+        else :
+            return "wrong_barcode"
+        
 
     except Exception:
         # 例外は shot_dir に必ず残す（原因特定用）
@@ -111,7 +117,7 @@ def book_barcode_sequence(barcode_number_input: str, shot_dir: Path, arm: XArm7)
         except Exception as e:
             print("[book barcode] ERROR while saving error log:", repr(e))
         # main側で拾いたければ raise、止めたくなければ return False
-        return False
+        return "error"
 
     # finally:
     #     # ここは必ず通る：ロボットをできるだけ元に戻す
@@ -140,16 +146,13 @@ def main():
     shot_dir = Path("./logs")
     shot_dir.mkdir(parents=True, exist_ok=True)
 
-
-    #もし、バーコード認識姿勢で終わらせたいのなら、この7行は随時コメントアウトする。（戻すの忘れずに）
-
-    #result = book_barcode_sequence(barcode_number_input, shot_dir, arm)
-    #time.sleep(5.0)
+    result = book_barcode_sequence(barcode_number_input, shot_dir, arm)
+    time.sleep(5.0)
     #arm.switch_gripper_pose(BOOK_BARCODE_2)
-    #arm.moveL_relative([0.0, -630.0, -50.0, 0.0, 0.0, 0.0])
-    #arm.switch_gripper_pose(BOOK_BARCODE_1)
-    #arm.moveJ_to_capture_right()
-    #print("RESULT:", result)
+    arm.moveL_relative([0.0, -630.0, -50.0, 0.0, 0.0, 0.0])
+    arm.switch_gripper_pose(BOOK_BARCODE_1)
+    arm.moveJ_to_capture_right()
+    print("RESULT:", result)
 
     node.destroy_node()
     rclpy.shutdown()

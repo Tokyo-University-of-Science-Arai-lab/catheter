@@ -26,7 +26,7 @@ def json_dump(path: Path, obj: dict) -> None:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--xarm-host", type=str, default="192.168.2.197", help="xArm IP (e.g. 192.168.1.208)")
+    ap.add_argument("--xarm-host", type=str, default="192.168.2.197", help="xArm IP (e.g. 192.168.2.197)")
     ap.add_argument(
         "--out-dir",
         type=str,
@@ -34,9 +34,9 @@ def main():
         help="output directory"
     )
     ap.add_argument("--num-samples", type=int, default=10, help="number of samples to save")
-    ap.add_argument("--marker-len-m", type=float, default=0.161, help="marker side length [m] (e.g. 0.040)")
+    ap.add_argument("--marker-len-m", type=float, default=0.149, help="marker side length [m] (e.g. 0.040)")
     ap.add_argument("--marker-id", type=int, default=0, help="use specific marker id (optional)")
-    ap.add_argument("--aruco-dict", type=str, default="DICT_5X5_100", help="ArUco dict name")
+    ap.add_argument("--aruco-dict", type=str, default="DICT_4X4_100", help="ArUco dict name")
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--fps", type=int, default=30)
@@ -144,7 +144,9 @@ def main():
             cv2.putText(vis, f"Saved: {len(samples)}/{args.num_samples}", (10, 60),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
-            cv2.imshow("handeye_capture (s=save, q=quit)", vis)
+            scale = 1.0
+            vis_big = cv2.resize(vis, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+            cv2.imshow("handeye_capture (s=save, q=quit)", vis_big)
             key = cv2.waitKey(10) & 0xFF
 
             if key == ord("q"):

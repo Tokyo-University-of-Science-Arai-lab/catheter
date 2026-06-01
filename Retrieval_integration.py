@@ -3,7 +3,7 @@ from rs_d435i.get_book_position import GetBookSpinePosition
 import Dynamixel_win_pro_hand_book.HandBook_Retrieval as HandBook_retrieval 
 import Dynamixel_win_pro_hand_book.HandBook_Storage as HandBook_storage
 from pathlib import Path
-from detection.pro_handbook.sam_py_demo.get_book_points_revised import run_capture_and_pca
+from detection.pro_handbook.sam_py_demo.get_book_points import run_capture_and_pca
 from xarm7.control.move_to_container_test import Move_to_Container
 from xarm7.control.shelf_id_manager import ShelfIDManager
 from detection.pro_handbook.sam_py_demo.bar_code.book_barcode import book_barcode_sequence
@@ -62,16 +62,39 @@ def load_config(config_path):
         return yaml.safe_load(f)
     
 def sigint_handler(sig, frame):
-    print("Ctrl+C detected → FORCE KILL")
+    print("Ctrl+C / Emergency detected → close hand then FORCE KILL")
+
+    try:
+        emergency_close_hand()
+    except Exception as e:
+        print(f"[EMG] emergency_close_hand failed: {e}")
+
     try:
         arm = globals().get("arm", None)
         if arm:
             arm.emergency_stop()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[EMG] xArm emergency_stop failed: {e}")
+
     os._exit(1)
 
+
+def emergency_close_hand():
+    try:
+        hand = globals().get("HandMotors_retrieval", None)
+        if hand is None:
+            print("[EMG] HandMotors_retrieval is None. Skip hand close.")
+            return
+
+        print("[EMG] Closing retrieval hand...")
+        HandBook_retrieval.grasp(hand)
+        print("[EMG] Hand closed.")
+
+    except Exception as e:
+        print(f"[EMG] Failed to close hand: {e}")
+        
 signal.signal(signal.SIGINT, sigint_handler)
+
 
 def hard_disconnect(arm):
     print("disconnect xArm NOW")
@@ -91,7 +114,6 @@ def main_sequence(
     book_name: str,
     barcode_number: str,
     bookshelf_ID: str,
-    book_shelf_height: str,
     book_width_offset: float,
     tp: TargetPublisher,
     node,
@@ -117,23 +139,32 @@ def main_sequence(
         height = shelf_manager.get_height()
         id = shelf_manager.get_shelf_id()
         tcp_offset = shelf_manager.get_tcp_z_offset()
-        monitor.on_abnormal = lambda msg: write_log(
-            config,
-            book_name,
-            id,
-            None,
-            None,
-            side,
-            height,
-            "safe_stop",
-            None,
-            msg
-        )
+        def on_xarm_abnormal(msg):
+            print(f"[ABNORMAL] {msg}")
+
+            # xArm異常検知時にもハンドを閉じる
+            emergency_close_hand()
+
+            write_log(
+                config,
+                book_name,
+                id,
+                None,
+                None,
+                side,
+                height,
+                "safe_stop",
+                None,
+                msg
+            )
+
+        monitor.on_abnormal = on_xarm_abnormal
 
         print("Shelf side:", side)
         print("Lift height:", height)
         # ==============================
         HandMotors_retrieval = HandBook_retrieval.init_dynamixels() 
+        globals()["HandMotors_retrieval"] = HandMotors_retrieval
         print("xarm ready")
         safe_motion(lambda: arm.moveJ_to_init_Q_DEG(), monitor, "init_pose")
         bar_dir = Path(config["paths"]["capture"]["bookshelf_barcode"])
@@ -484,14 +515,9 @@ def main_sequence(
     except Exception as e:
         print("Abort sequence due to exception")
         traceback.print_exc()
-        try:
-            HandMotors_retrieval.disable_torque(HandBook_retrieval.GRIPPER_ID)
-            HandMotors_retrieval.close_port()
-        except Exception:
-            pass
+        emergency_close_hand()
         os.kill(os.getpid(), signal.SIGINT)
-        return None 
-
+        return None
         
 def main():
     config = load_config("Retrieval_integration.yaml")
@@ -555,7 +581,6 @@ def main():
                 book_name=b["book_name"],
                 barcode_number=b["ISBN_number"],
                 bookshelf_ID=b["bookshelf_ID"],
-                book_shelf_height=b["book_shelf_height"],
                 book_width_offset=book_width_offset,
                 tp=tp,
                 node=node,

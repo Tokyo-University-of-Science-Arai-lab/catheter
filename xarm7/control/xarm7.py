@@ -481,41 +481,87 @@ class XArm7:
         self,
         p_robot_mm: np.ndarray,
         d_roll_rad: float,
-        side: str,                 # ← 追加
+        side: str,
         sleep_s: float = 0.02,
+        velocity: float = TCP_VEL_1,
+        acceleration: float = TCP_ACC_1,
+        pos_tol_mm: float = 1.0,
     ):
         p_robot_mm = np.asarray(p_robot_mm, dtype=np.float64).reshape(3)
-        x_offset_mm = 1.0
 
-        # sideによってオフセット決定
+        x_offset_mm = -5.0
+
         if side == "right":
-            x_offset_mm *= 1
-            y_offset_mm = 6.7
+            x_offset_mm *= 1.0
         elif side == "left":
-            x_offset_mm *= -1
-            y_offset_mm = 0
+            x_offset_mm *= -1.0
         else:
             raise ValueError("side must be 'right' or 'left'")
 
         curr = self.get_tcp_pose(is_radian=True)
-        curr_xyz = np.array(curr[:3], dtype=np.float64)
 
-        dxyz = p_robot_mm - curr_xyz
+        target_pose = [
+            float(p_robot_mm[0] + x_offset_mm),
+            float(p_robot_mm[1]),
+            float(p_robot_mm[2]),
+            float(curr[3] + d_roll_rad),
+            float(curr[4]),
+            float(curr[5]),
+        ]
 
-        self.moveL_relative(
-            [
-                float(dxyz[0]) + x_offset_mm,
-                float(dxyz[1]) + y_offset_mm,
-                float(dxyz[2]),
-                float(d_roll_rad),
-                0.0,
-                0.0
-            ],
-            asynchronous=False
+        print("\n========== ABS TARGET MOVE ==========")
+        print("[target pose]")
+        print(
+            f"X={target_pose[0]:.2f} mm, "
+            f"Y={target_pose[1]:.2f} mm, "
+            f"Z={target_pose[2]:.2f} mm, "
+            f"roll={target_pose[3]:.4f}, "
+            f"pitch={target_pose[4]:.4f}, "
+            f"yaw={target_pose[5]:.4f}"
+        )
+
+        ret = self._moveL(
+            target_pose,
+            velocity=velocity,
+            acceleration=acceleration,
+            asynchronous=False,
         )
 
         time.sleep(sleep_s)
 
+        after = self.get_tcp_pose(is_radian=True)
+        after_xyz = np.array(after[:3], dtype=np.float64)
+        target_xyz = np.array(target_pose[:3], dtype=np.float64)
+
+        err_xyz = target_xyz - after_xyz
+        err_norm = float(np.linalg.norm(err_xyz))
+
+        print("[after pose]")
+        print(
+            f"X={after[0]:.2f} mm, "
+            f"Y={after[1]:.2f} mm, "
+            f"Z={after[2]:.2f} mm, "
+            f"roll={after[3]:.4f}, "
+            f"pitch={after[4]:.4f}, "
+            f"yaw={after[5]:.4f}"
+        )
+
+        print("[position error]")
+        print(
+            f"dX={err_xyz[0]:.2f} mm, "
+            f"dY={err_xyz[1]:.2f} mm, "
+            f"dZ={err_xyz[2]:.2f} mm, "
+            f"|e|={err_norm:.2f} mm"
+        )
+
+        if err_norm <= pos_tol_mm:
+            print(f"[OK] reached target within {pos_tol_mm:.2f} mm")
+        else:
+            print(f"[WARN] target error is larger than tolerance: {err_norm:.2f} mm")
+
+        print("=====================================\n")
+
+        return ret
 
     def move_to_storage_target_xyz_and_roll(
         self,

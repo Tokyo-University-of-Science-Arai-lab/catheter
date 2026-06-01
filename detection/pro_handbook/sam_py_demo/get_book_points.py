@@ -25,6 +25,7 @@ import json
 import subprocess
 import re
 import traceback
+import os
 from .OCR.only_one import find_similar_books
 from .OCR.only_one_tilted import match_text_to_mask_main
 
@@ -165,6 +166,51 @@ def save_masked_and_cropped(
 
     return depth_masked  # ここで外れ値除去済みの depth を返す
 
+
+
+def save_existing_mask_and_depth(
+    rgb_bgr: np.ndarray,
+    depth_masked: np.ndarray,
+    mask01: np.ndarray,
+    outdir: Path,
+    stem: str,
+):
+    """
+    すでにDepth中央値補正や列長フィルタを適用済みの depth_masked / mask01 を保存する．
+
+    注意:
+      この関数ではDepth中央値±3cm補正を再実行しない．
+      save_masked_and_cropped() で先に作った depth_masked を，後段の2Dマスク補正や
+      列長フィルタ結果に合わせて保存し直すための関数．
+    """
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
+    depth_masked = np.asarray(depth_masked).copy()
+    depth_masked[mask01 == 0] = 0
+
+    valid = (mask01 > 0) & (depth_masked > 0)
+
+    rgb_masked = np.asarray(rgb_bgr).copy()
+    rgb_masked[~valid] = 0
+
+    cv2.imwrite(str(outdir / f"{stem}_rgb_masked.png"), rgb_masked)
+    np.save(outdir / f"{stem}_depth_masked.npy", depth_masked)
+    cv2.imwrite(str(outdir / f"{stem}_valid_mask.png"), valid.astype(np.uint8) * 255)
+
+    nonzero = depth_masked[depth_masked > 0]
+    if nonzero.size > 0:
+        zmin, zmax = int(nonzero.min()), int(nonzero.max())
+        zrange = max(1, zmax - zmin)
+        depth_vis = np.zeros_like(depth_masked, dtype=np.uint8)
+        depth_vis[depth_masked > 0] = (
+            (depth_masked[depth_masked > 0] - zmin) * 255 // zrange
+        ).astype(np.uint8)
+        cv2.imwrite(str(outdir / f"{stem}_depth_masked_vis.png"), depth_vis)
+
+    return depth_masked
+
 def capture_one_shot(pipe, cfg, align, shot_dir, *, stem: str, color_only: bool = False):
     profile = pipe.start(cfg)
 
@@ -202,26 +248,39 @@ def capture_one_shot(pipe, cfg, align, shot_dir, *, stem: str, color_only: bool 
     pipe.stop()
     return color_np, depth_np_u16, intr, depth_scale #後で調べる
 def run_ocr_subprocess(shot_dir: Path):
-    # OCR用仮想環境の python へのパス（あなたの環境に合わせて変更）
-    # Linux venv例: /home/book/venv/ocr/bin/python
     OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/bin/python"
     OCR_SCRIPT = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/paddle_ocr_test.py"
 
-    subprocess.run([OCR_PY, OCR_SCRIPT, str(shot_dir)], check=True)
+    env = os.environ.copy()
+    # PaddleOCR側が親プロセスのCUDA/cuBLASを拾って不安定になるのを避ける．
+    env.pop("LD_LIBRARY_PATH", None)
+    env["DISABLE_MODEL_SOURCE_CHECK"] = "True"
+    env["CUDA_VISIBLE_DEVICES"] = "0"
+
+    subprocess.run([OCR_PY, OCR_SCRIPT, str(shot_dir)], check=True, env=env)
     print(f"✔ OCR done: {shot_dir / 'ocr_result.json'}")
+
+
 def start_ocr_subprocess(shot_dir: Path):
     """
-    OCR を非同期で開始して Popen を返す。
-    後で communicate() / wait() して終了を待つ。
+    OCR を非同期で開始して Popen を返す．
+    後で communicate() / wait() して終了を待つ．
     """
     OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/bin/python"
     OCR_SCRIPT = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/paddle_ocr_test.py"
+
+    env = os.environ.copy()
+    # PaddleOCR側が親プロセスのCUDA/cuBLASを拾って不安定になるのを避ける．
+    env.pop("LD_LIBRARY_PATH", None)
+    env["DISABLE_MODEL_SOURCE_CHECK"] = "True"
+    env["CUDA_VISIBLE_DEVICES"] = "0"
 
     proc = subprocess.Popen(
         [OCR_PY, OCR_SCRIPT, str(shot_dir)],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        env=env,
     )
     return proc
 
@@ -1344,7 +1403,115 @@ def _find_consecutive_groups(indices: np.ndarray):
     return groups
 
 
-def refine_mask_by_spine_column_length_after_depth(
+
+def _get_seed_center_from_refine_info(refine_info: dict | None, fallback_center: np.ndarray):
+    """
+    列長フィルタで使うseed中心を返す．
+
+    優先順位:
+      1. selected_ocr_polygon.center
+      2. ocr_center
+      3. fallback_center
+
+    selected OCR polygon の中心と merged box 中心がずれるケースで，
+    対象背表紙の幅方向位置を取り違えないようにする．
+    """
+    rinfo = refine_info or {}
+
+    selected = rinfo.get("selected_ocr_polygon")
+    if isinstance(selected, dict) and selected.get("center") is not None:
+        try:
+            return np.asarray(selected["center"], dtype=np.float64).reshape(2), "selected_ocr_polygon_center"
+        except Exception:
+            pass
+
+    if rinfo.get("ocr_center") is not None:
+        try:
+            return np.asarray(rinfo["ocr_center"], dtype=np.float64).reshape(2), "ocr_center"
+        except Exception:
+            pass
+
+    return np.asarray(fallback_center, dtype=np.float64).reshape(2), "fallback_center"
+
+
+def _column_length_record_for_s_values(
+    s_values: np.ndarray,
+    s_origin: float,
+    s_bin_size_px: float,
+    gap_allow_bins: int,
+    span_percentiles: tuple[float, float] = (3.0, 97.0),
+    min_occupancy_density: float = 0.18,
+):
+    """
+    1本のt列に含まれるs座標から，列長情報を返す．
+
+    従来は「最長連続区間」だけを列長としていたため，Depth欠損で途中に穴が空くと，
+    背表紙方向に長い列でも短い列として扱われることがあった．
+    ここでは最長連続区間に加え，密度付きのロバストspan長も使う．
+    """
+    s_values = np.asarray(s_values, dtype=np.float64).reshape(-1)
+    if s_values.size <= 0:
+        return None
+
+    s_bin_size_px = max(float(s_bin_size_px), 1.0)
+    gap_allow_bins = max(int(gap_allow_bins), 0)
+
+    run = _longest_occupied_s_segment(
+        s_values,
+        s_origin=float(s_origin),
+        s_bin_size_px=s_bin_size_px,
+        gap_allow_bins=gap_allow_bins,
+    )
+    if run is None:
+        return None
+
+    p0, p1 = float(span_percentiles[0]), float(span_percentiles[1])
+    p0 = float(np.clip(p0, 0.0, 49.0))
+    p1 = float(np.clip(p1, 51.0, 100.0))
+
+    try:
+        span_s_min, span_s_max = np.percentile(s_values, [p0, p1])
+        span_length_px = float(max(0.0, span_s_max - span_s_min))
+    except Exception:
+        span_s_min, span_s_max, span_length_px = run["s_min"], run["s_max"], run["length_px"]
+
+    span_bin_count = max(1, int(round(span_length_px / s_bin_size_px)) + 1)
+    occupied_bin_count = int(run.get("occupied_bin_count", 0))
+    occupancy_density = float(occupied_bin_count / max(span_bin_count, 1))
+
+    run_length_px = float(run["length_px"])
+    density_weight = float(np.clip(occupancy_density / max(float(min_occupancy_density), 1e-6), 0.0, 1.0))
+    span_supported_length = float(span_length_px * density_weight)
+
+    effective_length_px = float(max(run_length_px, span_supported_length))
+
+    if span_supported_length >= run_length_px:
+        eff_s_min = float(span_s_min)
+        eff_s_max = float(span_s_max)
+        effective_source = "span_supported"
+    else:
+        eff_s_min = float(run["s_min"])
+        eff_s_max = float(run["s_max"])
+        effective_source = "longest_run"
+
+    out = dict(run)
+    out.update({
+        "run_length_px": run_length_px,
+        "span_s_min": float(span_s_min),
+        "span_s_max": float(span_s_max),
+        "span_length_px": float(span_length_px),
+        "span_bin_count": int(span_bin_count),
+        "occupancy_density": float(occupancy_density),
+        "density_weight": float(density_weight),
+        "effective_length_px": float(effective_length_px),
+        "effective_s_min": float(eff_s_min),
+        "effective_s_max": float(eff_s_max),
+        "effective_source": effective_source,
+    })
+    return out
+
+
+def refine_mask_by_spine_column_length_after_depth_legacy(
     mask01: np.ndarray,
     depth_masked: np.ndarray,
     refine_info: dict | None,
@@ -1352,28 +1519,39 @@ def refine_mask_by_spine_column_length_after_depth(
     *,
     t_bin_size_px: float = 4.0,
     s_bin_size_px: float = 5.0,
-    s_gap_allow_px: float = 18.0,
-    length_reference_percentile: float = 85.0,
-    min_length_ratio: float = 0.65,
-    relaxed_edge_length_ratio: float = 0.55,
-    min_points_per_t_bin: int = 12,
+    s_gap_allow_px: float = 24.0,
+    length_reference_percentile: float = 100.0,
+    min_length_ratio: float = 0.95,
+    relaxed_edge_length_ratio: float = 0.95,
+    min_points_per_t_bin: int = 10,
     min_selected_t_bins: int = 2,
     expand_selected_t_bins: int = 0,
-    s_margin_px: float = 8.0,
-    min_valid_keep_ratio: float = 0.30,
+    s_margin_px: float = 0.0,
+    min_valid_keep_ratio: float = 0.20,
+    length_reference_mode: str = "max",
+    seed_local_window_bins: int = 10,
+    bridge_gap_bins: int = 1,
+    max_seed_group_distance_bins: int = 3,
+    use_global_s_range: bool = False,
+    span_percentiles: tuple[float, float] = (2.0, 98.0),
+    min_occupancy_density: float = 0.0,
     return_info: bool = False,
 ):
     """
-    Depth中央値±3cm補正後の点群列長さを使って，側面・局所張り出しを削る．
+    Depth中央値±3cm補正後の有効点に対して，OCR文字領域の主成分方向に平行な
+    点群列を作り，列長に基づいて側面部を除去する．
 
-    考え方:
-      1. depth_masked > 0 の点だけを，実際に点群化される有効点として扱う．
-      2. OCR/SAMから得た背表紙方向axisをs軸，直交方向をt軸とする．
-      3. t方向に細かくbin分割し，各t列についてs方向の最長連続長を求める．
-      4. 十分な長さを持つt列だけを候補にする．
-      5. OCR seedのt座標に近い連続したt列グループだけを残す．
-
-    幅そのものは固定しない．各書籍ごとに「背表紙方向に長い点群列が存在する範囲」を幅として間接的に求める．
+    処理の仕様:
+      1. 入力 depth_masked は，save_masked_and_cropped() により既に
+         「マスク内Depth中央値±z_tolerance_raw（既定30count≈3cm）」で補正済み．
+      2. valid = mask01 > 0 かつ depth_masked > 0 の画素だけを対象とする．
+      3. OCRで選択された文字領域から主成分方向を求める．ただし，OCR長辺が文字列方向で
+         背表紙方向と90度ずれることがあるため，SAMマスクPCA主軸に近い向きを採用する．
+      4. 主成分方向をs軸，直交方向をt軸として，t方向に列を作る．
+      5. 各列のs方向長さ L(t) を計算する．Depth欠損対策として，長さはpercentile spanで計算する．
+      6. 原則として a = max L(t) とし，L(t) < 0.9a の列を除去する．
+      7. ただし，最大列が側面・隣接本由来でOCR seedから遠い場合は，OCR seed近傍の局所最大長を基準にする．
+      8. 採用した列の有効Depth画素はs方向には再カットしない．
     """
     h, w = image_shape
     mask01 = (mask01 > 0).astype(np.uint8)
@@ -1384,18 +1562,28 @@ def refine_mask_by_spine_column_length_after_depth(
     info = {
         "used": False,
         "reason": "",
+        "algorithm": "depth_filtered_ocr_axis_parallel_column_length",
         "valid_count_before": valid_count,
         "t_bin_size_px": float(t_bin_size_px),
-        "s_bin_size_px": float(s_bin_size_px),
-        "s_gap_allow_px": float(s_gap_allow_px),
-        "length_reference_percentile": float(length_reference_percentile),
+        "span_percentiles": [float(span_percentiles[0]), float(span_percentiles[1])],
         "min_length_ratio": float(min_length_ratio),
         "relaxed_edge_length_ratio": float(relaxed_edge_length_ratio),
         "min_points_per_t_bin": int(min_points_per_t_bin),
         "min_selected_t_bins": int(min_selected_t_bins),
+        "min_valid_keep_ratio": float(min_valid_keep_ratio),
+        "seed_local_window_bins": int(seed_local_window_bins),
+        "bridge_gap_bins": int(bridge_gap_bins),
+        "max_seed_group_distance_bins": int(max_seed_group_distance_bins),
+        "note": "Depth中央値±3cm補正後に，OCR文字領域主成分方向に平行な列長を評価する．最大長0.9基準を基本とし，最大長がOCR seedから遠い場合はseed近傍基準に切り替える．",
+        # 互換・ログ用
+        "s_bin_size_px": float(s_bin_size_px),
+        "s_gap_allow_px": float(s_gap_allow_px),
+        "length_reference_mode": str(length_reference_mode),
+        "length_reference_percentile": float(length_reference_percentile),
         "expand_selected_t_bins": int(expand_selected_t_bins),
         "s_margin_px": float(s_margin_px),
-        "min_valid_keep_ratio": float(min_valid_keep_ratio),
+        "use_global_s_range": bool(use_global_s_range),
+        "min_occupancy_density": float(min_occupancy_density),
     }
 
     if valid_count < 50:
@@ -1403,20 +1591,50 @@ def refine_mask_by_spine_column_length_after_depth(
         return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
 
     rinfo = refine_info or {}
-    axis = rinfo.get("axis", None)
-    center = rinfo.get("ocr_center", None)
+
+    # ===== 軸とseed中心の決定 =====
+    # 重要: OCR polygonの長辺をそのまま使うと，文字列方向と背表紙方向が90度ずれることがある．
+    # そのため，OCR長辺と直交方向のうち，SAMマスクPCAに近い方を背表紙方向として使う．
+    selected = rinfo.get("selected_ocr_polygon", {}) if isinstance(rinfo, dict) else {}
+    selected_poly = None
+    if isinstance(selected, dict):
+        selected_poly = _poly_from_any(selected.get("poly"))
+
+    axis = None
+    center = None
+    axis_source = None
+    center_source = None
+    mask_axis = _mask_pca_axis(mask01)
+
+    if selected_poly is not None:
+        c_poly, axis_poly, short_len, long_len = _polygon_center_and_axis(selected_poly)
+        if axis_poly is not None and c_poly is not None:
+            axis, axis_kind = _choose_axis_consistent_with_mask(axis_poly, mask_axis)
+            axis = np.asarray(axis, dtype=np.float64).reshape(2)
+            center = np.asarray(c_poly, dtype=np.float64).reshape(2)
+            axis_source = f"selected_ocr_polygon_{axis_kind}"
+            center_source = "selected_ocr_polygon_center"
+            info["selected_ocr_text"] = selected.get("text")
+            info["selected_ocr_transform_mode"] = selected.get("transform_mode")
+            info["selected_ocr_poly"] = np.asarray(selected_poly, dtype=np.float32).tolist()
+            info["selected_ocr_short_len_px"] = None if short_len is None else float(short_len)
+            info["selected_ocr_long_len_px"] = None if long_len is None else float(long_len)
+            info["mask_pca_axis"] = None if mask_axis is None else [float(mask_axis[0]), float(mask_axis[1])]
 
     if axis is None:
-        axis = _mask_pca_axis(mask01)
-        info["axis_source"] = "mask_pca_fallback"
-    else:
-        info["axis_source"] = str(rinfo.get("axis_source", "refine_info_axis"))
+        axis = rinfo.get("axis", None)
+        center = rinfo.get("ocr_center", None)
+        if axis is not None and center is not None:
+            axis = np.asarray(axis, dtype=np.float64).reshape(2)
+            center = np.asarray(center, dtype=np.float64).reshape(2)
+            axis_source = str(rinfo.get("axis_source", "refine_info_axis_fallback"))
+            center_source = "refine_info_ocr_center_fallback"
 
-    if center is None:
+    if axis is None or center is None:
+        axis = mask_axis
         center = _mask_centroid(mask01)
-        info["center_source"] = "mask_centroid_fallback"
-    else:
-        info["center_source"] = "ocr_center"
+        axis_source = "mask_pca_fallback"
+        center_source = "mask_centroid_fallback"
 
     if axis is None or center is None:
         info["reason"] = "axis or center is unavailable"
@@ -1438,15 +1656,11 @@ def refine_mask_by_spine_column_length_after_depth(
     t_coords = rel @ normal
 
     t_bin_size_px = max(float(t_bin_size_px), 1.0)
-    s_bin_size_px = max(float(s_bin_size_px), 1.0)
-    gap_allow_bins = int(round(float(s_gap_allow_px) / s_bin_size_px))
-
     t_min_all = float(np.min(t_coords))
     t_max_all = float(np.max(t_coords))
     s_min_all = float(np.min(s_coords))
     s_max_all = float(np.max(s_coords))
     n_t_bins = int(np.floor((t_max_all - t_min_all) / t_bin_size_px)) + 1
-
     if n_t_bins < 1:
         info["reason"] = "invalid t bin count"
         return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
@@ -1454,14 +1668,22 @@ def refine_mask_by_spine_column_length_after_depth(
     t_bins = np.floor((t_coords - t_min_all) / t_bin_size_px).astype(np.int32)
     t_bins = np.clip(t_bins, 0, n_t_bins - 1)
 
+    seed_t = 0.0
+    seed_bin = int(np.floor((seed_t - t_min_all) / t_bin_size_px))
+    seed_bin = int(np.clip(seed_bin, 0, n_t_bins - 1))
+
+    # ===== 各t列の長さを計算 =====
+    p_low = float(np.clip(float(span_percentiles[0]), 0.0, 49.0))
+    p_high = float(np.clip(float(span_percentiles[1]), 51.0, 100.0))
+    if p_high <= p_low:
+        p_low, p_high = 0.0, 100.0
+
     column_records = []
     lengths = []
-    counts = []
-
     for b in range(n_t_bins):
         idx = np.where(t_bins == b)[0]
         count = int(idx.size)
-        record = {
+        rec = {
             "t_bin": int(b),
             "t_min": float(t_min_all + b * t_bin_size_px),
             "t_max": float(t_min_all + (b + 1) * t_bin_size_px),
@@ -1471,133 +1693,148 @@ def refine_mask_by_spine_column_length_after_depth(
             "s_max": None,
             "is_good": False,
             "is_relaxed_good": False,
+            "is_selected": False,
         }
         if count >= int(min_points_per_t_bin):
-            seg = _longest_occupied_s_segment(
-                s_coords[idx],
-                s_origin=s_min_all,
-                s_bin_size_px=s_bin_size_px,
-                gap_allow_bins=gap_allow_bins,
-            )
-            if seg is not None:
-                record.update({
-                    "length_px": float(seg["length_px"]),
-                    "s_min": float(seg["s_min"]),
-                    "s_max": float(seg["s_max"]),
-                    "start_bin": int(seg["start_bin"]),
-                    "end_bin": int(seg["end_bin"]),
-                    "point_count_in_run": int(seg["point_count_in_run"]),
-                    "occupied_bin_count": int(seg["occupied_bin_count"]),
-                })
-        column_records.append(record)
-        lengths.append(float(record["length_px"]))
-        counts.append(count)
+            sv = s_coords[idx]
+            try:
+                s0, s1 = np.percentile(sv, [p_low, p_high])
+            except Exception:
+                s0, s1 = float(np.min(sv)), float(np.max(sv))
+            length = float(max(0.0, float(s1) - float(s0)))
+            rec.update({
+                "length_px": length,
+                "s_min": float(s0),
+                "s_max": float(s1),
+                "raw_s_min": float(np.min(sv)),
+                "raw_s_max": float(np.max(sv)),
+            })
+        column_records.append(rec)
+        lengths.append(float(rec["length_px"]))
 
     lengths_np = np.asarray(lengths, dtype=np.float64)
-    positive_lengths = lengths_np[lengths_np > 0]
-    if positive_lengths.size < 2:
+    positive = lengths_np[lengths_np > 0]
+    if positive.size < 2:
         info["reason"] = "too few positive length columns"
         return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
 
-    ref_percentile = float(np.clip(length_reference_percentile, 50.0, 100.0))
-    reference_length = float(np.percentile(positive_lengths, ref_percentile))
-    max_length = float(np.max(positive_lengths))
-    if reference_length <= 1.0:
-        info["reason"] = "invalid reference length"
-        return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+    def groups_from_threshold(th: float):
+        bins = []
+        for rec in column_records:
+            if rec["point_count"] >= int(min_points_per_t_bin) and rec["length_px"] >= th:
+                bins.append(int(rec["t_bin"]))
+        bins = np.asarray(bins, dtype=np.int32)
+        return bins, _find_consecutive_groups(bins)
 
-    length_threshold = float(reference_length * float(min_length_ratio))
-    relaxed_threshold = float(reference_length * float(relaxed_edge_length_ratio))
+    def dist_group_to_seed(g0: int, g1: int) -> int:
+        if g0 <= seed_bin <= g1:
+            return 0
+        return int(min(abs(seed_bin - g0), abs(seed_bin - g1)))
 
-    good_bins = []
-    relaxed_bins = []
-    for rec in column_records:
-        if rec["point_count"] >= int(min_points_per_t_bin) and rec["length_px"] >= length_threshold:
-            rec["is_good"] = True
-            good_bins.append(int(rec["t_bin"]))
-        if rec["point_count"] >= int(min_points_per_t_bin) and rec["length_px"] >= relaxed_threshold:
-            rec["is_relaxed_good"] = True
-            relaxed_bins.append(int(rec["t_bin"]))
+    def choose_seed_group(groups, lengths_arr):
+        best = None
+        best_score = -1e18
+        for g0, g1 in groups:
+            dist = dist_group_to_seed(int(g0), int(g1))
+            width_bins = int(g1 - g0 + 1)
+            mean_len = float(np.mean(lengths_arr[g0:g1 + 1]))
+            score = -100.0 * float(dist) + 2.0 * float(width_bins) + 0.01 * mean_len
+            if score > best_score:
+                best_score = score
+                best = (int(g0), int(g1), int(dist), float(mean_len), int(width_bins))
+        return best
 
-    good_bins = np.asarray(good_bins, dtype=np.int32)
-    if good_bins.size == 0:
+    # ===== まずはユーザー指定どおり global max の0.9を使う =====
+    global_max = float(np.max(positive))
+    global_threshold = float(global_max * float(min_length_ratio))
+    good_bins, groups = groups_from_threshold(global_threshold)
+    selected = choose_seed_group(groups, lengths_np) if groups else None
+    reference_source = "global_max"
+    reference_length = global_max
+    threshold = global_threshold
+
+    # ===== ただし，global max group がOCR seedから遠い場合は，最大列が側面・隣接本由来の可能性がある =====
+    # その場合だけ，OCR seed近傍の局所最大を基準に切り替える．
+    fallback_used = False
+    if selected is None or selected[2] > int(max_seed_group_distance_bins):
+        lo = max(0, seed_bin - int(seed_local_window_bins))
+        hi = min(n_t_bins - 1, seed_bin + int(seed_local_window_bins))
+        local_lengths = lengths_np[lo:hi + 1]
+        local_positive = local_lengths[local_lengths > 0]
+        if local_positive.size >= 2:
+            local_max = float(np.max(local_positive))
+            local_threshold = float(local_max * float(min_length_ratio))
+            local_good_bins = []
+            for b in range(lo, hi + 1):
+                rec = column_records[b]
+                if rec["point_count"] >= int(min_points_per_t_bin) and rec["length_px"] >= local_threshold:
+                    local_good_bins.append(int(b))
+            local_good_bins = np.asarray(local_good_bins, dtype=np.int32)
+            local_groups = _find_consecutive_groups(local_good_bins)
+            local_selected = choose_seed_group(local_groups, lengths_np) if local_groups else None
+            if local_selected is not None:
+                good_bins = local_good_bins
+                groups = local_groups
+                selected = local_selected
+                reference_source = "seed_local_max"
+                reference_length = local_max
+                threshold = local_threshold
+                fallback_used = True
+
+    if selected is None:
         info.update({
-            "reason": "no long columns found",
-            "reference_length_px": reference_length,
-            "max_length_px": max_length,
-            "length_threshold_px": length_threshold,
+            "reason": "failed to select good-bin group",
+            "global_max_length_px": global_max,
+            "global_threshold_px": global_threshold,
+            "seed_bin": int(seed_bin),
         })
         return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
 
-    seed_t = float((center - center) @ normal)  # center自身なので0．明示のため残す．
-    seed_bin = int(np.floor((seed_t - t_min_all) / t_bin_size_px))
-    seed_bin = int(np.clip(seed_bin, 0, n_t_bins - 1))
+    g0, g1, selected_dist, selected_mean_len, selected_width_bins = selected
 
-    groups = _find_consecutive_groups(good_bins)
-    if not groups:
-        info["reason"] = "failed to make good-bin groups"
-        return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+    # 小さな穴が1〜2binだけある場合は，列長基準の穴として埋める．
+    # ただし，これはg0〜g1内の穴だけを埋める処理で，0.9a未満の外側列を広げる処理ではない．
+    selected_bins_set = set(int(v) for v in good_bins.tolist())
+    if int(bridge_gap_bins) > 0:
+        b = g0
+        while b <= g1:
+            if b not in selected_bins_set:
+                # 前後にgood列があり，穴幅がbridge_gap_bins以下なら埋める
+                hole_start = b
+                while b <= g1 and b not in selected_bins_set:
+                    b += 1
+                hole_end = b - 1
+                hole_width = hole_end - hole_start + 1
+                if hole_width <= int(bridge_gap_bins) and (hole_start - 1 in selected_bins_set) and (hole_end + 1 in selected_bins_set):
+                    for hb in range(hole_start, hole_end + 1):
+                        selected_bins_set.add(hb)
+            b += 1
 
-    # OCR seed に最も近い長い列グループを採用する．
-    selected_group = None
-    best_group_score = -1e18
-    for g0, g1 in groups:
-        if g0 <= seed_bin <= g1:
-            dist = 0
-        elif seed_bin < g0:
-            dist = g0 - seed_bin
-        else:
-            dist = seed_bin - g1
-        width_bins = g1 - g0 + 1
-        mean_len = float(np.mean(lengths_np[g0:g1 + 1]))
-        # seedから近く，幅があり，長いグループを優先する．
-        score = -10.0 * float(dist) + 0.5 * float(width_bins) + 0.01 * mean_len
-        if score > best_group_score:
-            best_group_score = score
-            selected_group = (int(g0), int(g1))
-
-    if selected_group is None:
-        info["reason"] = "failed to select t group"
-        return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
-
-    g0, g1 = selected_group
-
-    # 境界だけは少し緩めの列を取り込めるようにする．
-    relaxed_set = set(int(v) for v in relaxed_bins)
-    for _ in range(max(int(expand_selected_t_bins), 0)):
-        if g0 - 1 in relaxed_set:
-            g0 -= 1
-        if g1 + 1 in relaxed_set:
-            g1 += 1
-
+    # 連続範囲としては g0〜g1 を採用するが，外側へのrelaxed拡張はしない．
     selected_bin_count = int(g1 - g0 + 1)
     if selected_bin_count < int(min_selected_t_bins):
         info.update({
-            "reason": "selected t group is too narrow",
+            "reason": "selected t group is too narrow; reverted to depth-filtered mask",
+            "reference_source": reference_source,
+            "reference_length_px": reference_length,
+            "length_threshold_px": threshold,
             "selected_group": [int(g0), int(g1)],
             "selected_bin_count": selected_bin_count,
         })
         return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
 
-    keep_point = np.zeros_like(t_bins, dtype=bool)
-    s_margin_px = max(float(s_margin_px), 0.0)
-
+    keep_bins = np.zeros((n_t_bins,), dtype=bool)
     for b in range(g0, g1 + 1):
-        rec = column_records[b]
-        if rec.get("s_min") is None or rec.get("s_max") is None:
-            continue
-        idx = np.where(t_bins == b)[0]
-        if idx.size == 0:
-            continue
-        s0 = float(rec["s_min"]) - s_margin_px
-        s1 = float(rec["s_max"]) + s_margin_px
-        keep_point[idx] = (s_coords[idx] >= s0) & (s_coords[idx] <= s1)
+        if b in selected_bins_set or int(bridge_gap_bins) > 0:
+            keep_bins[b] = True
+
+    keep_point = keep_bins[t_bins]
 
     mask_after = np.zeros_like(mask01, dtype=np.uint8)
     mask_after[ys[keep_point], xs[keep_point]] = 1
 
-    # 小さな孤立成分は除去する．ただし主たる背表紙成分まで削らないよう，弱めにする．
-    mask_after, component_info = _filter_small_components(mask_after, min_area_ratio=0.001)
+    # 極小孤立成分だけ除去．ここを強くすると背表紙を削るため，かなり弱くする．
+    mask_after, component_info = _filter_small_components(mask_after, min_area_ratio=0.0003)
 
     depth_after = depth_masked.copy()
     depth_after[mask_after == 0] = 0
@@ -1605,9 +1842,17 @@ def refine_mask_by_spine_column_length_after_depth(
     valid_after_count = int(np.count_nonzero(depth_after > 0))
     valid_keep_ratio = float(valid_after_count / max(valid_count, 1))
 
+    for rec in column_records:
+        b = int(rec["t_bin"])
+        rec["is_good"] = bool(b in set(int(v) for v in good_bins.tolist()))
+        rec["is_relaxed_good"] = bool(rec["is_good"])
+        rec["is_selected"] = bool(g0 <= b <= g1 and keep_bins[b])
+
     info.update({
         "used": True,
         "reason": "ok",
+        "axis_source": axis_source,
+        "center_source": center_source,
         "axis": [float(axis[0]), float(axis[1])],
         "normal": [float(normal[0]), float(normal[1])],
         "center": [float(center[0]), float(center[1])],
@@ -1616,23 +1861,27 @@ def refine_mask_by_spine_column_length_after_depth(
         "s_min_all": float(s_min_all),
         "s_max_all": float(s_max_all),
         "n_t_bins": int(n_t_bins),
-        "gap_allow_bins": int(gap_allow_bins),
-        "reference_length_px": float(reference_length),
-        "max_length_px": float(max_length),
-        "length_threshold_px": float(length_threshold),
-        "relaxed_threshold_px": float(relaxed_threshold),
-        "good_bins": [int(v) for v in good_bins.tolist()],
-        "groups": [[int(a), int(b)] for a, b in groups],
         "seed_t": float(seed_t),
         "seed_bin": int(seed_bin),
+        "global_max_length_px": float(global_max),
+        "global_threshold_px": float(global_threshold),
+        "reference_length_px": float(reference_length),
+        "reference_source": reference_source,
+        "length_threshold_px": float(threshold),
+        "local_fallback_used": bool(fallback_used),
+        "good_bins": [int(v) for v in good_bins.tolist()],
+        "groups": [[int(a), int(b)] for a, b in groups],
         "selected_group": [int(g0), int(g1)],
+        "selected_group_distance_from_seed_bins": int(selected_dist),
         "selected_bin_count": int(selected_bin_count),
-        "selected_t_min": float(t_min_all + g0 * t_bin_size_px),
-        "selected_t_max": float(t_min_all + (g1 + 1) * t_bin_size_px),
+        "selected_t_min": float(t_min_all + int(np.where(keep_bins)[0][0]) * t_bin_size_px) if np.any(keep_bins) else float(t_min_all + g0 * t_bin_size_px),
+        "selected_t_max": float(t_min_all + (int(np.where(keep_bins)[0][-1]) + 1) * t_bin_size_px) if np.any(keep_bins) else float(t_min_all + (g1 + 1) * t_bin_size_px),
+        "remove_boundary_t": (float(t_min_all + g0 * t_bin_size_px) if remove_side == "negative" else (float(t_min_all + (g1 + 1) * t_bin_size_px) if remove_side == "positive" else None)),
+        "selected_s_min": None,
+        "selected_s_max": None,
         "valid_count_after": int(valid_after_count),
         "valid_keep_ratio": float(valid_keep_ratio),
         "component_filter": component_info,
-        # JSONが巨大になりすぎないよう，column_recordsは必要情報のみに制限する．
         "column_records": [
             {
                 "t_bin": int(r["t_bin"]),
@@ -1642,6 +1891,7 @@ def refine_mask_by_spine_column_length_after_depth(
                 "s_max": None if r.get("s_max") is None else float(r["s_max"]),
                 "is_good": bool(r.get("is_good", False)),
                 "is_relaxed_good": bool(r.get("is_relaxed_good", False)),
+                "is_selected": bool(r.get("is_selected", False)),
             }
             for r in column_records
         ],
@@ -1649,13 +1899,663 @@ def refine_mask_by_spine_column_length_after_depth(
 
     if valid_keep_ratio < float(min_valid_keep_ratio):
         info["used"] = False
-        info["reason"] = f"too much valid depth removed: valid_keep_ratio={valid_keep_ratio:.3f}"
+        info["reason"] = f"too much valid depth removed: valid_keep_ratio={valid_keep_ratio:.3f}; reverted to depth-filtered mask"
         info["valid_count_after"] = valid_count
         info["valid_keep_ratio"] = 1.0
         return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
 
     return (mask_after, depth_after, info) if return_info else (mask_after, depth_after)
 
+
+
+
+def refine_mask_by_spine_column_length_after_depth(
+    mask01: np.ndarray,
+    depth_masked: np.ndarray,
+    refine_info: dict | None,
+    image_shape: tuple[int, int],
+    *,
+    t_bin_size_px: float = 4.0,
+    s_bin_size_px: float = 5.0,
+    s_gap_allow_px: float = 24.0,
+    length_reference_percentile: float = 85.0,
+    min_length_ratio: float = 0.95,
+    relaxed_edge_length_ratio: float = 0.95,
+    min_points_per_t_bin: int = 6,
+    min_selected_t_bins: int = 2,
+    expand_selected_t_bins: int = 0,
+    s_margin_px: float = 0.0,
+    min_valid_keep_ratio: float = 0.35,
+    length_reference_mode: str = "robust_percentile",
+    seed_local_window_bins: int = 14,
+    bridge_gap_bins: int = 2,
+    max_seed_group_distance_bins: int = 4,
+    use_global_s_range: bool = False,
+    span_percentiles: tuple[float, float] = (2.0, 98.0),
+    min_occupancy_density: float = 0.0,
+    use_seed_width_guard: bool = True,
+    seed_width_guard_scale: float = 1.10,
+    min_seed_guard_width_px: float = 40.0,
+    max_seed_guard_width_px: float = 140.0,
+    one_sided_removal: bool = True,
+    one_sided_min_candidate_points: int = 30,
+    one_sided_score_margin_ratio: float = 1.05,
+    protect_ocr_extended_band: bool = True,
+    ocr_extended_protection_margin_px: float = 0.0,
+    return_info: bool = False,
+):
+    """
+    Depth中央値±3cm補正後の有効点に対し，OCR文字領域の軸を使って側面部を除去する．
+
+    旧版との差分:
+      - OCR帯補正で直接maskを削ると，背表紙本体まで削るケースがあるため，
+        本関数ではOCR中心・OCR軸をseedとして用いる．
+      - global max * 0.9 は外れ値に引っ張られるため，85 percentile長を基準にする．
+      - shape_infoの width_median_px があれば，OCR seed 周辺の典型幅を背表紙コアとして推定する．
+      - 側面部は片側だけに見えるという前提を使い，削る側を1方向に限定する．
+        つまり，削除候補が多い側だけを削り，背表紙を挟んだ反対側の点群は保護する．
+      - さらに，選択OCR文字領域を背表紙方向axisへ延長した帯は信頼領域として保護する．
+        保護帯のnormal方向幅は，選択OCR polygonをaxis直交方向へ投影した幅そのものを使う．
+      - 採用したt列の中では，s方向の上下を再カットしない．
+    """
+    h, w = image_shape
+    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
+    depth_masked = np.asarray(depth_masked)
+    valid = (mask01 > 0) & (depth_masked > 0)
+    valid_count = int(np.count_nonzero(valid))
+
+    info = {
+        "used": False,
+        "reason": "",
+        "algorithm": "safe_seed_width_guard_after_depth_prefilter",
+        "valid_count_before": valid_count,
+        "t_bin_size_px": float(t_bin_size_px),
+        "s_bin_size_px": float(s_bin_size_px),
+        "s_gap_allow_px": float(s_gap_allow_px),
+        "length_reference_mode": str(length_reference_mode),
+        "length_reference_percentile": float(length_reference_percentile),
+        "span_percentiles": [float(span_percentiles[0]), float(span_percentiles[1])],
+        "min_length_ratio_requested": float(min_length_ratio),
+        "relaxed_edge_length_ratio_requested": float(relaxed_edge_length_ratio),
+        "min_points_per_t_bin": int(min_points_per_t_bin),
+        "min_selected_t_bins": int(min_selected_t_bins),
+        "expand_selected_t_bins": int(expand_selected_t_bins),
+        "min_valid_keep_ratio": float(min_valid_keep_ratio),
+        "seed_local_window_bins": int(seed_local_window_bins),
+        "bridge_gap_bins": int(bridge_gap_bins),
+        "max_seed_group_distance_bins": int(max_seed_group_distance_bins),
+        "use_seed_width_guard": bool(use_seed_width_guard),
+        "seed_width_guard_scale": float(seed_width_guard_scale),
+        "min_seed_guard_width_px": float(min_seed_guard_width_px),
+        "max_seed_guard_width_px": float(max_seed_guard_width_px),
+        "one_sided_removal": bool(one_sided_removal),
+        "one_sided_min_candidate_points": int(one_sided_min_candidate_points),
+        "one_sided_score_margin_ratio": float(one_sided_score_margin_ratio),
+        "protect_ocr_extended_band": bool(protect_ocr_extended_band),
+        "ocr_extended_protection_margin_px": float(ocr_extended_protection_margin_px),
+        "note": "Depth補正後マスクに対してOCR軸のseed近傍幅を背表紙コアとして推定し，側面候補が多い片側だけを削る．反対側の点群と，選択OCR文字領域をaxis方向へ延長した保護帯は削らない．背表紙削りすぎを避けるためs方向には切らない．",
+    }
+
+    if valid_count < 50:
+        info["reason"] = "too few valid depth points"
+        return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+
+    rinfo = refine_info or {}
+
+    # ===== 軸と中心の決定 =====
+    selected = rinfo.get("selected_ocr_polygon", {}) if isinstance(rinfo, dict) else {}
+    selected_poly = _poly_from_any(selected.get("poly")) if isinstance(selected, dict) else None
+
+    axis = None
+    center = None
+    axis_source = None
+    center_source = None
+    mask_axis = _mask_pca_axis(mask01)
+
+    if selected_poly is not None:
+        c_poly, axis_poly, short_len, long_len = _polygon_center_and_axis(selected_poly)
+        if axis_poly is not None and c_poly is not None:
+            axis, axis_kind = _choose_axis_consistent_with_mask(axis_poly, mask_axis)
+            axis = np.asarray(axis, dtype=np.float64).reshape(2)
+            center = np.asarray(c_poly, dtype=np.float64).reshape(2)
+            axis_source = f"selected_ocr_polygon_{axis_kind}"
+            center_source = "selected_ocr_polygon_center"
+            info["selected_ocr_text"] = selected.get("text")
+            info["selected_ocr_transform_mode"] = selected.get("transform_mode")
+            info["selected_ocr_poly"] = np.asarray(selected_poly, dtype=np.float32).tolist()
+            info["selected_ocr_short_len_px"] = None if short_len is None else float(short_len)
+            info["selected_ocr_long_len_px"] = None if long_len is None else float(long_len)
+            info["mask_pca_axis"] = None if mask_axis is None else [float(mask_axis[0]), float(mask_axis[1])]
+
+    if axis is None:
+        axis = rinfo.get("axis", None)
+        center = rinfo.get("ocr_center", None)
+        if axis is not None and center is not None:
+            axis = np.asarray(axis, dtype=np.float64).reshape(2)
+            center = np.asarray(center, dtype=np.float64).reshape(2)
+            axis_source = str(rinfo.get("axis_source", "refine_info_axis_fallback"))
+            center_source = "refine_info_ocr_center_fallback"
+
+    if axis is None or center is None:
+        axis = mask_axis
+        center = _mask_centroid(mask01)
+        axis_source = "mask_pca_fallback"
+        center_source = "mask_centroid_fallback"
+
+    if axis is None or center is None:
+        info["reason"] = "axis or center is unavailable"
+        return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+
+    axis = np.asarray(axis, dtype=np.float64).reshape(2)
+    an = float(np.linalg.norm(axis))
+    if an < 1e-9:
+        info["reason"] = "invalid axis"
+        return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+    axis = axis / an
+    normal = np.asarray([-axis[1], axis[0]], dtype=np.float64)
+    center = np.asarray(center, dtype=np.float64).reshape(2)
+
+    ys, xs = np.where(valid)
+    pts = np.stack([xs.astype(np.float64), ys.astype(np.float64)], axis=1)
+    rel = pts - center
+    s_coords = rel @ axis
+    t_coords = rel @ normal
+
+    t_bin_size_px = max(float(t_bin_size_px), 1.0)
+    t_min_all = float(np.min(t_coords))
+    t_max_all = float(np.max(t_coords))
+    s_min_all = float(np.min(s_coords))
+    s_max_all = float(np.max(s_coords))
+
+    n_t_bins = int(np.floor((t_max_all - t_min_all) / t_bin_size_px)) + 1
+    if n_t_bins < 1:
+        info["reason"] = "invalid t bin count"
+        return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+
+    t_bins = np.floor((t_coords - t_min_all) / t_bin_size_px).astype(np.int32)
+    t_bins = np.clip(t_bins, 0, n_t_bins - 1)
+
+    seed_t = 0.0
+    seed_bin = int(np.floor((seed_t - t_min_all) / t_bin_size_px))
+    seed_bin = int(np.clip(seed_bin, 0, n_t_bins - 1))
+
+    # ===== 各t列のs方向長さを計算 =====
+    p_low = float(np.clip(float(span_percentiles[0]), 0.0, 49.0))
+    p_high = float(np.clip(float(span_percentiles[1]), 51.0, 100.0))
+    if p_high <= p_low:
+        p_low, p_high = 2.0, 98.0
+
+    column_records = []
+    lengths = np.zeros((n_t_bins,), dtype=np.float64)
+    counts = np.zeros((n_t_bins,), dtype=np.int32)
+
+    for b in range(n_t_bins):
+        idx = np.where(t_bins == b)[0]
+        count = int(idx.size)
+        counts[b] = count
+        rec = {
+            "t_bin": int(b),
+            "t_min": float(t_min_all + b * t_bin_size_px),
+            "t_max": float(t_min_all + (b + 1) * t_bin_size_px),
+            "t_center": float(t_min_all + (b + 0.5) * t_bin_size_px),
+            "point_count": count,
+            "length_px": 0.0,
+            "s_min": None,
+            "s_max": None,
+            "is_good": False,
+            "is_relaxed_good": False,
+            "is_seed_guard": False,
+            "is_selected": False,
+            "is_removed_candidate_side": False,
+            "is_opposite_side_protected": False,
+            "is_ocr_extended_protected": False,
+        }
+        if count >= max(3, int(min_points_per_t_bin)):
+            sv = s_coords[idx]
+            try:
+                s0, s1 = np.percentile(sv, [p_low, p_high])
+            except Exception:
+                s0, s1 = float(np.min(sv)), float(np.max(sv))
+            length = float(max(0.0, float(s1) - float(s0)))
+            lengths[b] = length
+            rec.update({
+                "length_px": length,
+                "s_min": float(s0),
+                "s_max": float(s1),
+                "raw_s_min": float(np.min(sv)),
+                "raw_s_max": float(np.max(sv)),
+            })
+        column_records.append(rec)
+
+    positive = lengths[lengths > 0]
+    if positive.size < 2:
+        info["reason"] = "too few positive length columns"
+        return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+
+    ref_percentile = float(np.clip(float(length_reference_percentile), 50.0, 100.0))
+    robust_reference = float(np.percentile(positive, ref_percentile))
+    global_max = float(np.max(positive))
+
+    # 呼び出し側が0.90を渡してきても，safe版では削りすぎ防止のため上限を設ける．
+    effective_min_ratio = float(min(float(min_length_ratio), 0.95))
+    effective_relaxed_ratio = float(min(float(relaxed_edge_length_ratio), 0.95))
+    core_threshold = float(robust_reference * effective_min_ratio)
+    relaxed_threshold = float(robust_reference * effective_relaxed_ratio)
+
+    good_bins = np.where((counts >= int(min_points_per_t_bin)) & (lengths >= core_threshold))[0].astype(np.int32)
+    relaxed_bins = np.where((counts >= max(3, int(min_points_per_t_bin) // 2)) & (lengths >= relaxed_threshold))[0].astype(np.int32)
+
+    def _groups(indices):
+        return _find_consecutive_groups(np.asarray(indices, dtype=np.int32))
+
+    def _dist_group_to_seed(g0: int, g1: int) -> int:
+        if g0 <= seed_bin <= g1:
+            return 0
+        return int(min(abs(seed_bin - g0), abs(seed_bin - g1)))
+
+    # ===== seed width guard =====
+    # shape_info の width_median_px は長手方向スライスの典型幅なので，
+    # 側面混入時でも背表紙本体の幅に比較的近い．
+    shape_info = rinfo.get("shape_rectangularity", {}) if isinstance(rinfo, dict) else {}
+    shape_width_median_px = None
+    if isinstance(shape_info, dict):
+        try:
+            val = float(shape_info.get("width_median_px", 0.0))
+            if np.isfinite(val) and val > 1.0:
+                shape_width_median_px = val
+        except Exception:
+            shape_width_median_px = None
+
+    seed_guard_used = False
+    seed_guard_half_width_px = None
+    seed_guard_bins = np.array([], dtype=np.int32)
+    t_centers = np.asarray([float(r["t_center"]) for r in column_records], dtype=np.float64)
+
+    if bool(use_seed_width_guard) and shape_width_median_px is not None:
+        seed_guard_half_width_px = 0.5 * shape_width_median_px * float(seed_width_guard_scale)
+        seed_guard_half_width_px = float(max(seed_guard_half_width_px, float(min_seed_guard_width_px) * 0.5))
+        seed_guard_half_width_px = float(min(seed_guard_half_width_px, float(max_seed_guard_width_px) * 0.5))
+
+        guard = np.abs(t_centers - seed_t) <= seed_guard_half_width_px
+        guard &= counts >= max(3, int(min_points_per_t_bin) // 2)
+
+        seed_guard_bins = np.where(guard)[0].astype(np.int32)
+        if seed_guard_bins.size >= int(min_selected_t_bins):
+            seed_guard_used = True
+
+    if seed_guard_used:
+        # guard内のうち，seedに最も近い連続groupのみ残す．
+        groups = _groups(seed_guard_bins)
+        best_group = min(groups, key=lambda g: _dist_group_to_seed(int(g[0]), int(g[1]))) if groups else None
+        if best_group is None:
+            info["reason"] = "failed to select seed guard group"
+            return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+        g0, g1 = int(best_group[0]), int(best_group[1])
+        keep_bin_indices = np.arange(g0, g1 + 1, dtype=np.int32)
+        reference_source = "shape_width_median_seed_guard"
+    else:
+        # width guardが使えない場合のみ，長さ閾値に基づくseed近傍グループを使う．
+        candidate_bins = relaxed_bins if relaxed_bins.size > 0 else good_bins
+        groups = _groups(candidate_bins)
+        if not groups:
+            info.update({
+                "reason": "no candidate bins from length threshold; reverted to depth-filtered mask",
+                "global_max_length_px": global_max,
+                "robust_reference_length_px": robust_reference,
+                "core_threshold_px": core_threshold,
+                "relaxed_threshold_px": relaxed_threshold,
+                "seed_bin": int(seed_bin),
+            })
+            return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+
+        best_group = None
+        best_score = -1e18
+        for g0_, g1_ in groups:
+            g0_, g1_ = int(g0_), int(g1_)
+            dist = _dist_group_to_seed(g0_, g1_)
+            width_bins = int(g1_ - g0_ + 1)
+            mean_len = float(np.mean(lengths[g0_:g1_ + 1]))
+            score = -100.0 * float(dist) + 2.0 * float(width_bins) + 0.01 * mean_len
+            if score > best_score:
+                best_score = score
+                best_group = (g0_, g1_)
+        if best_group is None:
+            info["reason"] = "failed to select seed group"
+            return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+
+        g0, g1 = best_group
+        g0 = max(0, int(g0) - int(expand_selected_t_bins))
+        g1 = min(n_t_bins - 1, int(g1) + int(expand_selected_t_bins))
+        keep_bin_indices = np.arange(g0, g1 + 1, dtype=np.int32)
+        reference_source = "relaxed_length_seed_group"
+
+    selected_bin_count = int(g1 - g0 + 1)
+    if selected_bin_count < int(min_selected_t_bins):
+        info.update({
+            "reason": "selected t group is too narrow; reverted to depth-filtered mask",
+            "selected_group": [int(g0), int(g1)],
+            "selected_bin_count": selected_bin_count,
+        })
+        return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+
+    # ===== OCR文字領域をaxis方向へ延長した保護帯 =====
+    # 選択OCR polygonを，採用したaxisとnormalで見たときのnormal方向範囲を使う．
+    # s方向には制限を設けないため，Depth補正後マスク全体の端まで延長された帯になる．
+    # この帯に入る有効点は，片側側面除去の削除候補になっても必ず残す．
+    ocr_extended_protection_used = False
+    ocr_protection_point = np.zeros((pts.shape[0],), dtype=bool)
+    ocr_protected_bins = np.zeros((n_t_bins,), dtype=bool)
+    ocr_protection_t_min = None
+    ocr_protection_t_max = None
+    ocr_protection_width_px = None
+    ocr_protection_margin = float(max(0.0, float(ocr_extended_protection_margin_px)))
+
+    if bool(protect_ocr_extended_band) and selected_poly is not None:
+        try:
+            poly_pts = np.asarray(selected_poly, dtype=np.float64).reshape(-1, 2)
+            if poly_pts.shape[0] >= 4:
+                poly_t = (poly_pts - center) @ normal
+                t0 = float(np.min(poly_t) - ocr_protection_margin)
+                t1 = float(np.max(poly_t) + ocr_protection_margin)
+                if np.isfinite(t0) and np.isfinite(t1) and (t1 - t0) > 1.0:
+                    ocr_protection_t_min = t0
+                    ocr_protection_t_max = t1
+                    ocr_protection_width_px = float(t1 - t0)
+                    ocr_protection_point = (t_coords >= t0) & (t_coords <= t1)
+                    # 可視化・ログ用に，保護帯と重なるt-binも記録する．実際の保護はpoint単位で行う．
+                    for b in range(n_t_bins):
+                        bt0 = float(t_min_all + b * t_bin_size_px)
+                        bt1 = float(t_min_all + (b + 1) * t_bin_size_px)
+                        if bt1 >= t0 and bt0 <= t1:
+                            ocr_protected_bins[b] = True
+                    ocr_extended_protection_used = bool(np.count_nonzero(ocr_protection_point) > 0)
+        except Exception as e:
+            info["ocr_extended_protection_error"] = str(e)
+
+    # ===== 片側側面除去 =====
+    # 側面は背表紙の片側にしか見えない，という物理的制約を利用する．
+    # まず seed_guard/列長から背表紙コア [g0, g1] を推定し，
+    # その外側にある削除候補が t<0 側に多いか，t>0 側に多いかを判定する．
+    # その後，削除候補が多い側だけを削り，反対側の点群は保護する．
+    negative_bins = np.arange(0, max(0, int(g0)), dtype=np.int32)
+    positive_bins = np.arange(min(n_t_bins, int(g1) + 1), n_t_bins, dtype=np.int32)
+
+    negative_candidate_points = int(np.sum(counts[negative_bins])) if negative_bins.size > 0 else 0
+    positive_candidate_points = int(np.sum(counts[positive_bins])) if positive_bins.size > 0 else 0
+    negative_candidate_length_sum = float(np.sum(lengths[negative_bins])) if negative_bins.size > 0 else 0.0
+    positive_candidate_length_sum = float(np.sum(lengths[positive_bins])) if positive_bins.size > 0 else 0.0
+
+    # 点数を主スコアにしつつ，長く伸びている外側列も少し評価する．
+    # これにより「外側に多く残っている側」を側面候補として選ぶ．
+    negative_side_score = float(negative_candidate_points) + 0.02 * negative_candidate_length_sum
+    positive_side_score = float(positive_candidate_points) + 0.02 * positive_candidate_length_sum
+
+    side_removal_used = False
+    remove_side = None
+    protected_side = None
+    side_decision_ambiguous = False
+
+    keep_bins = np.zeros((n_t_bins,), dtype=bool)
+    core_bins = np.zeros((n_t_bins,), dtype=bool)
+    core_bins[keep_bin_indices] = True
+
+    total_outside_points = negative_candidate_points + positive_candidate_points
+    if bool(one_sided_removal) and total_outside_points >= int(one_sided_min_candidate_points):
+        min_score = min(negative_side_score, positive_side_score)
+        max_score = max(negative_side_score, positive_side_score)
+        ratio = float(max_score / max(min_score, 1e-6))
+        side_decision_ambiguous = bool(ratio < float(one_sided_score_margin_ratio))
+
+        if positive_side_score >= negative_side_score:
+            # t正側に側面候補が多い → t正側のみ削る．t負側は保護する．
+            remove_side = "positive"
+            protected_side = "negative"
+            keep_bins[: int(g1) + 1] = True
+            side_removal_used = True
+        else:
+            # t負側に側面候補が多い → t負側のみ削る．t正側は保護する．
+            remove_side = "negative"
+            protected_side = "positive"
+            keep_bins[int(g0):] = True
+            side_removal_used = True
+    else:
+        # 外側候補が少ない場合は，従来どおりコアだけを使う．
+        # ここに来る場合，そもそも側面候補が少ないと判断している．
+        keep_bins[keep_bin_indices] = True
+
+    keep_point_before_ocr_protection = keep_bins[t_bins]
+    removed_candidate_before_ocr_protection = ~keep_point_before_ocr_protection
+
+    if ocr_extended_protection_used:
+        keep_point = keep_point_before_ocr_protection | ocr_protection_point
+    else:
+        keep_point = keep_point_before_ocr_protection
+
+    rescued_by_ocr_protection_count = int(np.count_nonzero(removed_candidate_before_ocr_protection & ocr_protection_point))
+    ocr_protected_point_count = int(np.count_nonzero(ocr_protection_point))
+
+    mask_after = np.zeros_like(mask01, dtype=np.uint8)
+    mask_after[ys[keep_point], xs[keep_point]] = 1
+
+    # 極小孤立成分のみ除去．強くすると背表紙が欠けるため弱くする．
+    mask_after, component_info = _filter_small_components(mask_after, min_area_ratio=0.0002)
+
+    # component filter で保護帯の点が落ちた場合は再度救済する．
+    # OCR文字領域をaxis方向に延長した帯は信頼領域として扱うため，最終出力でも削らない．
+    if ocr_extended_protection_used:
+        protected_after_component = np.zeros_like(mask01, dtype=np.uint8)
+        protected_after_component[ys[ocr_protection_point], xs[ocr_protection_point]] = 1
+        mask_after = ((mask_after > 0) | (protected_after_component > 0)).astype(np.uint8)
+
+    depth_after = depth_masked.copy()
+    depth_after[mask_after == 0] = 0
+
+    valid_after_count = int(np.count_nonzero(depth_after > 0))
+    valid_keep_ratio = float(valid_after_count / max(valid_count, 1))
+
+    set_good = set(int(v) for v in good_bins.tolist())
+    set_relaxed = set(int(v) for v in relaxed_bins.tolist())
+    set_guard = set(int(v) for v in seed_guard_bins.tolist())
+    set_ocr_protected = set(int(v) for v in np.where(ocr_protected_bins)[0].tolist())
+
+    for rec in column_records:
+        b = int(rec["t_bin"])
+        rec["is_good"] = bool(b in set_good)
+        rec["is_relaxed_good"] = bool(b in set_relaxed)
+        rec["is_seed_guard"] = bool(b in set_guard)
+        rec["is_selected"] = bool(keep_bins[b])
+        rec["is_ocr_extended_protected"] = bool(b in set_ocr_protected)
+        if remove_side == "negative":
+            rec["is_removed_candidate_side"] = bool(b < int(g0))
+            rec["is_opposite_side_protected"] = bool(b > int(g1))
+        elif remove_side == "positive":
+            rec["is_removed_candidate_side"] = bool(b > int(g1))
+            rec["is_opposite_side_protected"] = bool(b < int(g0))
+        else:
+            rec["is_removed_candidate_side"] = False
+            rec["is_opposite_side_protected"] = False
+
+    info.update({
+        "used": True,
+        "reason": "ok",
+        "axis_source": axis_source,
+        "center_source": center_source,
+        "axis": [float(axis[0]), float(axis[1])],
+        "normal": [float(normal[0]), float(normal[1])],
+        "center": [float(center[0]), float(center[1])],
+        "t_min_all": float(t_min_all),
+        "t_max_all": float(t_max_all),
+        "s_min_all": float(s_min_all),
+        "s_max_all": float(s_max_all),
+        "n_t_bins": int(n_t_bins),
+        "seed_t": float(seed_t),
+        "seed_bin": int(seed_bin),
+        "global_max_length_px": float(global_max),
+        "max_length_px": float(global_max),
+        "robust_reference_length_px": float(robust_reference),
+        "reference_length_px": float(robust_reference),
+        "reference_source": reference_source,
+        "core_threshold_px": float(core_threshold),
+        "relaxed_threshold_px": float(relaxed_threshold),
+        "length_threshold_px": float(relaxed_threshold),
+        "effective_min_length_ratio": float(effective_min_ratio),
+        "effective_relaxed_edge_length_ratio": float(effective_relaxed_ratio),
+        "shape_width_median_px": None if shape_width_median_px is None else float(shape_width_median_px),
+        "seed_guard_used": bool(seed_guard_used),
+        "seed_guard_half_width_px": None if seed_guard_half_width_px is None else float(seed_guard_half_width_px),
+        "seed_guard_width_px": None if seed_guard_half_width_px is None else float(2.0 * seed_guard_half_width_px),
+        "good_bins": [int(v) for v in good_bins.tolist()],
+        "relaxed_bins": [int(v) for v in relaxed_bins.tolist()],
+        "seed_guard_bins": [int(v) for v in seed_guard_bins.tolist()],
+        "one_sided_removal_used": bool(side_removal_used),
+        "remove_side": remove_side,
+        "protected_side": protected_side,
+        "opposite_side_protected": bool(side_removal_used),
+        "side_decision_ambiguous": bool(side_decision_ambiguous),
+        "ocr_extended_protection_used": bool(ocr_extended_protection_used),
+        "ocr_extended_protection_t_min": None if ocr_protection_t_min is None else float(ocr_protection_t_min),
+        "ocr_extended_protection_t_max": None if ocr_protection_t_max is None else float(ocr_protection_t_max),
+        "ocr_extended_protection_width_px": None if ocr_protection_width_px is None else float(ocr_protection_width_px),
+        "ocr_extended_protection_margin_px": float(ocr_protection_margin),
+        "ocr_extended_protected_point_count": int(ocr_protected_point_count),
+        "rescued_by_ocr_extended_protection_count": int(rescued_by_ocr_protection_count),
+        "ocr_extended_protected_bins": [int(v) for v in np.where(ocr_protected_bins)[0].tolist()],
+        "negative_candidate_points": int(negative_candidate_points),
+        "positive_candidate_points": int(positive_candidate_points),
+        "negative_candidate_length_sum": float(negative_candidate_length_sum),
+        "positive_candidate_length_sum": float(positive_candidate_length_sum),
+        "negative_side_score": float(negative_side_score),
+        "positive_side_score": float(positive_side_score),
+        "core_group": [int(g0), int(g1)],
+        "core_t_min": float(t_min_all + g0 * t_bin_size_px),
+        "core_t_max": float(t_min_all + (g1 + 1) * t_bin_size_px),
+        "groups": [[int(a), int(b)] for a, b in _groups(keep_bin_indices)],
+        "selected_group": [int(g0), int(g1)],
+        "selected_group_distance_from_seed_bins": int(_dist_group_to_seed(g0, g1)),
+        "selected_bin_count": int(selected_bin_count),
+        "selected_t_min": float(t_min_all + g0 * t_bin_size_px),
+        "selected_t_max": float(t_min_all + (g1 + 1) * t_bin_size_px),
+        "valid_count_after": int(valid_after_count),
+        "valid_keep_ratio": float(valid_keep_ratio),
+        "component_filter": component_info,
+        "column_records": [
+            {
+                "t_bin": int(r["t_bin"]),
+                "point_count": int(r["point_count"]),
+                "length_px": float(r["length_px"]),
+                "s_min": None if r.get("s_min") is None else float(r["s_min"]),
+                "s_max": None if r.get("s_max") is None else float(r["s_max"]),
+                "is_good": bool(r.get("is_good", False)),
+                "is_relaxed_good": bool(r.get("is_relaxed_good", False)),
+                "is_seed_guard": bool(r.get("is_seed_guard", False)),
+                "is_selected": bool(r.get("is_selected", False)),
+                "is_removed_candidate_side": bool(r.get("is_removed_candidate_side", False)),
+                "is_opposite_side_protected": bool(r.get("is_opposite_side_protected", False)),
+                "is_ocr_extended_protected": bool(r.get("is_ocr_extended_protected", False)),
+            }
+            for r in column_records
+        ],
+    })
+
+    if valid_keep_ratio < float(min_valid_keep_ratio):
+        info["used"] = False
+        info["reason"] = f"too much valid depth removed: valid_keep_ratio={valid_keep_ratio:.3f}; reverted to depth-filtered mask"
+        info["valid_count_after"] = valid_count
+        info["valid_keep_ratio"] = 1.0
+        return (mask01, depth_masked, info) if return_info else (mask01, depth_masked)
+
+    return (mask_after, depth_after, info) if return_info else (mask_after, depth_after)
+
+def estimate_book_width_from_filtered_mask_axis(
+    mask01: np.ndarray,
+    depth_masked: np.ndarray,
+    intr,
+    depth_scale: float,
+    column_info: dict | None,
+    refine_info: dict | None = None,
+    *,
+    width_percentiles: tuple[float, float] = (2.0, 98.0),
+    min_width_mm: float = 2.0,
+    max_width_mm: float = 150.0,
+):
+    """
+    側面除去後の最終mask/depthから，ハンド開口幅用の書籍幅を推定する．
+
+    重要:
+      estimate_book_width(pts_f, mean, pc1, pc2) は3D PCA軸に依存するため，
+      側面部が少し残るだけでpc2が斜めを向き，開口幅が大きく崩れることがある．
+      ここでは，側面除去で使った画像上の背表紙軸normal方向の画素幅を使い，
+      median depthとカメラ内部パラメータでメートル換算する．
+    """
+    info = {"used": False, "reason": ""}
+    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
+    depth_masked = np.asarray(depth_masked)
+    valid = (mask01 > 0) & (depth_masked > 0)
+    if int(np.count_nonzero(valid)) < 20:
+        info["reason"] = "too few valid pixels"
+        return None, info
+
+    cinfo = column_info or {}
+    rinfo = refine_info or {}
+    axis = cinfo.get("axis", None) or rinfo.get("axis", None)
+    center = cinfo.get("center", None) or rinfo.get("ocr_center", None)
+    if axis is None or center is None:
+        info["reason"] = "axis or center unavailable"
+        return None, info
+
+    axis = np.asarray(axis, dtype=np.float64).reshape(2)
+    an = float(np.linalg.norm(axis))
+    if an < 1e-9:
+        info["reason"] = "invalid axis"
+        return None, info
+    axis = axis / an
+    normal = np.asarray([-axis[1], axis[0]], dtype=np.float64)
+    center = np.asarray(center, dtype=np.float64).reshape(2)
+
+    ys, xs = np.where(valid)
+    pts2 = np.stack([xs.astype(np.float64), ys.astype(np.float64)], axis=1)
+    t = (pts2 - center) @ normal
+
+    p0, p1 = width_percentiles
+    p0 = float(np.clip(p0, 0.0, 49.0))
+    p1 = float(np.clip(p1, 51.0, 100.0))
+    t0, t1 = np.percentile(t, [p0, p1])
+    width_px = float(max(0.0, t1 - t0))
+
+    z_raw = depth_masked[valid]
+    z_med_m = float(np.median(z_raw) * float(depth_scale))
+    if not np.isfinite(z_med_m) or z_med_m <= 0.0:
+        info["reason"] = "invalid median depth"
+        return None, info
+
+    fx = float(intr.fx)
+    fy = float(intr.fy)
+    scale_m_per_px = z_med_m * float(np.sqrt((normal[0] / fx) ** 2 + (normal[1] / fy) ** 2))
+    width_m = float(width_px * scale_m_per_px)
+    width_mm = width_m * 1000.0
+
+    info.update({
+        "used": True,
+        "reason": "ok",
+        "method": "filtered_mask_axis_pixel_width_to_metric",
+        "width_px": float(width_px),
+        "width_m": float(width_m),
+        "width_mm": float(width_mm),
+        "z_median_m": float(z_med_m),
+        "scale_m_per_px": float(scale_m_per_px),
+        "axis": [float(axis[0]), float(axis[1])],
+        "normal": [float(normal[0]), float(normal[1])],
+        "center": [float(center[0]), float(center[1])],
+        "width_percentiles": [float(p0), float(p1)],
+        "valid_pixel_count": int(np.count_nonzero(valid)),
+    })
+
+    if (not np.isfinite(width_m)) or width_mm < float(min_width_mm) or width_mm > float(max_width_mm):
+        info["used"] = False
+        info["reason"] = f"estimated width out of range: {width_mm:.3f} mm"
+        return None, info
+
+    return width_m, info
 
 def save_spine_column_length_debug(
     shot_dir: Path,
@@ -1716,6 +2616,43 @@ def save_spine_column_length_debug(
                 q2 = (int(round(cx + ox + ax * length)), int(round(cy + oy + ay * length)))
                 cv2.line(axis_img, q1, q2, (255, 0, 255), 2)
 
+        # OCR文字領域をaxis方向へ延長した保護帯の境界を描画．
+        # 青線 = OCR保護帯の左右境界．この帯の内部は側面除去で削らない．
+        prot_t_min = info.get("ocr_extended_protection_t_min")
+        prot_t_max = info.get("ocr_extended_protection_t_max")
+        if normal is not None and prot_t_min is not None and prot_t_max is not None:
+            nx, ny = float(normal[0]), float(normal[1])
+            for tval in (float(prot_t_min), float(prot_t_max)):
+                ox = nx * tval
+                oy = ny * tval
+                q1 = (int(round(cx + ox - ax * length)), int(round(cy + oy - ay * length)))
+                q2 = (int(round(cx + ox + ax * length)), int(round(cy + oy + ay * length)))
+                cv2.line(axis_img, q1, q2, (255, 0, 0), 2)
+
+    # OCR延長保護帯の領域を別画像でも保存する．
+    prot_t_min = info.get("ocr_extended_protection_t_min")
+    prot_t_max = info.get("ocr_extended_protection_t_max")
+    center_dbg = info.get("center")
+    normal_dbg = info.get("normal")
+    if prot_t_min is not None and prot_t_max is not None and center_dbg is not None and normal_dbg is not None:
+        try:
+            c = np.asarray(center_dbg, dtype=np.float64).reshape(2)
+            nvec = np.asarray(normal_dbg, dtype=np.float64).reshape(2)
+            nvec = nvec / max(float(np.linalg.norm(nvec)), 1e-9)
+            yy, xx = np.where(valid_before > 0)
+            pts2 = np.stack([xx.astype(np.float64), yy.astype(np.float64)], axis=1)
+            tt = (pts2 - c) @ nvec
+            prot = (tt >= float(prot_t_min)) & (tt <= float(prot_t_max))
+            prot_mask = np.zeros_like(valid_before, dtype=np.uint8)
+            prot_mask[yy[prot], xx[prot]] = 1
+            prot_img = color_np.copy()
+            # BGR: 青 = OCR延長保護領域
+            prot_img[prot_mask == 1] = (255, 0, 0)
+            prot_blend = cv2.addWeighted(color_np, 0.65, prot_img, 0.35, 0)
+            cv2.imwrite(str(debug_dir / f"{stem}_ocr_extended_protected_band.png"), prot_blend)
+        except Exception:
+            traceback.print_exc()
+
     contours, _ = cv2.findContours(mask_after, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
         cv2.drawContours(axis_img, contours, -1, (0, 255, 0), 2, cv2.LINE_AA)
@@ -1751,6 +2688,8 @@ def save_spine_column_length_debug(
                 color = (180, 220, 180)
             if bool(rec.get("is_good", False)):
                 color = (0, 180, 0)
+            if bool(rec.get("is_ocr_extended_protected", False)):
+                color = (255, 150, 80)  # BGR: blue-ish, OCR延長保護帯
             if selected is not None and int(selected[0]) <= i <= int(selected[1]):
                 color = (0, 120, 255)
             cv2.rectangle(graph, (x0, y0), (max(x0 + 1, x1 - 1), y1), color, -1)
@@ -2315,6 +3254,221 @@ def save_mask_refine_debug(
     save_json(debug_dir / f"{stem}_log.json", log)
 
     print(f"✔ Saved OCR-band debug files: {debug_dir}")
+
+def analyze_mask_rectangularity(
+    mask01: np.ndarray,
+    image_shape: tuple[int, int] | None = None,
+    *,
+    min_area_px: int = 200,
+    iou_threshold: float = 0.82,
+    extent_threshold: float = 0.78,
+    solidity_threshold: float = 0.92,
+    width_cv_threshold: float = 0.28,
+    width_max_median_threshold: float = 1.55,
+    approx_vertex_max: int = 8,
+):
+    """
+    選択SAMマスクが「きれいな回転長方形」に近いかを判定する．
+
+    目的:
+      側面部除去の列長フィルタは，正常な背表紙マスクまで削るリスクがある．
+      そこで，マスクが十分に長方形らしい場合は削る操作をスキップする．
+
+    判定指標:
+      - rotated_rect_iou : マスクと最小外接回転矩形のIoU．高いほど長方形らしい．
+      - extent           : mask_area / rotated_rect_area．高いほど矩形内が埋まっている．
+      - solidity         : contour_area / convex_hull_area．低いと凹みや欠けが多い．
+      - width_cv         : 長手方向に沿った断面幅の変動係数．低いほど幅が安定．
+      - width_max_over_median : 局所的な張り出しがあると大きくなる．
+
+    戻り値:
+      clean_rectangle=True なら，側面部除去を行わない．
+      needs_refine=True なら，OCR軸・列長に基づく削る操作を行う．
+    """
+    mask = (np.asarray(mask01) > 0).astype(np.uint8)
+    area = int(mask.sum())
+    info = {
+        "area_px": area,
+        "clean_rectangle": False,
+        "needs_refine": True,
+        "reason": "",
+        "thresholds": {
+            "iou_threshold": float(iou_threshold),
+            "extent_threshold": float(extent_threshold),
+            "solidity_threshold": float(solidity_threshold),
+            "width_cv_threshold": float(width_cv_threshold),
+            "width_max_median_threshold": float(width_max_median_threshold),
+            "approx_vertex_max": int(approx_vertex_max),
+        },
+    }
+
+    if area < int(min_area_px):
+        info["reason"] = "too small mask"
+        return info
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        info["reason"] = "no contour"
+        return info
+
+    cnt = max(contours, key=cv2.contourArea)
+    contour_area = float(cv2.contourArea(cnt))
+    if contour_area <= 1.0:
+        info["reason"] = "invalid contour area"
+        return info
+
+    rect = cv2.minAreaRect(cnt)
+    (cx, cy), (rw, rh), angle = rect
+    rw = float(rw)
+    rh = float(rh)
+    rect_area = float(max(rw * rh, 1.0))
+    rect_box = cv2.boxPoints(rect).astype(np.float32)
+
+    rect_mask = np.zeros_like(mask, dtype=np.uint8)
+    cv2.fillPoly(rect_mask, [np.round(rect_box).astype(np.int32)], 1)
+    inter = int(((mask > 0) & (rect_mask > 0)).sum())
+    union = int(((mask > 0) | (rect_mask > 0)).sum())
+    rotated_rect_iou = float(inter / max(union, 1))
+    extent = float(area / rect_area)
+
+    hull = cv2.convexHull(cnt)
+    hull_area = float(max(cv2.contourArea(hull), 1.0))
+    solidity = float(contour_area / hull_area)
+
+    peri = float(cv2.arcLength(cnt, True))
+    approx = cv2.approxPolyDP(cnt, 0.025 * peri, True) if peri > 1.0 else cnt
+    approx_vertices = int(len(approx))
+
+    # 回転矩形の長手方向に沿って断面幅の安定性を見る．
+    # きれいな背表紙なら各スライスの幅が比較的安定し，側面張り出しがあると局所的に幅が増える．
+    long_axis = None
+    if rw >= rh:
+        # minAreaRect の angle は幅方向の角度に対応するため，rw>=rhならその方向を長手とする．
+        a = np.deg2rad(float(angle))
+        long_axis = np.array([np.cos(a), np.sin(a)], dtype=np.float64)
+    else:
+        a = np.deg2rad(float(angle) + 90.0)
+        long_axis = np.array([np.cos(a), np.sin(a)], dtype=np.float64)
+    long_axis = long_axis / max(float(np.linalg.norm(long_axis)), 1e-9)
+    normal = np.array([-long_axis[1], long_axis[0]], dtype=np.float64)
+    center = np.array([float(cx), float(cy)], dtype=np.float64)
+
+    ys, xs = np.where(mask > 0)
+    pts = np.stack([xs.astype(np.float64), ys.astype(np.float64)], axis=1)
+    rel = pts - center
+    s = rel @ long_axis
+    t = rel @ normal
+
+    width_cv = 999.0
+    width_median = 0.0
+    width_max_over_median = 999.0
+    width_valid_slices = 0
+    try:
+        # 書籍上下端は幅が欠けやすいので，中央80%程度で幅変動を見る．
+        s_low, s_high = np.percentile(s, [10.0, 90.0])
+        use = (s >= s_low) & (s <= s_high)
+        s_use = s[use]
+        t_use = t[use]
+        if s_use.size >= 50:
+            n_bins = max(8, min(80, int(round((s_high - s_low) / 10.0))))
+            edges = np.linspace(float(s_low), float(s_high), n_bins + 1)
+            widths = []
+            for i in range(n_bins):
+                m = (s_use >= edges[i]) & (s_use < edges[i + 1])
+                if np.count_nonzero(m) < 8:
+                    continue
+                q0, q1 = np.percentile(t_use[m], [5.0, 95.0])
+                widths.append(float(q1 - q0))
+            if len(widths) >= 4:
+                widths_np = np.asarray(widths, dtype=np.float64)
+                width_valid_slices = int(len(widths_np))
+                width_median = float(np.median(widths_np))
+                width_cv = float(np.std(widths_np) / max(width_median, 1e-6))
+                width_max_over_median = float(np.max(widths_np) / max(width_median, 1e-6))
+    except Exception:
+        pass
+
+    # 条件をやや保守的にする．「長方形っぽい」場合だけ削りを完全スキップする．
+    clean_rectangle = (
+        rotated_rect_iou >= float(iou_threshold)
+        and extent >= float(extent_threshold)
+        and solidity >= float(solidity_threshold)
+        and approx_vertices <= int(approx_vertex_max)
+        and (width_valid_slices < 4 or (
+            width_cv <= float(width_cv_threshold)
+            and width_max_over_median <= float(width_max_median_threshold)
+        ))
+    )
+
+    info.update({
+        "clean_rectangle": bool(clean_rectangle),
+        "needs_refine": bool(not clean_rectangle),
+        "reason": "clean rotated rectangle" if clean_rectangle else "irregular mask shape",
+        "contour_area_px": float(contour_area),
+        "rotated_rect_area_px": float(rect_area),
+        "rotated_rect_iou": float(rotated_rect_iou),
+        "extent": float(extent),
+        "solidity": float(solidity),
+        "approx_vertices": int(approx_vertices),
+        "width_cv": float(width_cv),
+        "width_median_px": float(width_median),
+        "width_max_over_median": float(width_max_over_median),
+        "width_valid_slices": int(width_valid_slices),
+        "rect_center": [float(cx), float(cy)],
+        "rect_size": [float(rw), float(rh)],
+        "rect_angle_deg": float(angle),
+        "rect_box": rect_box.tolist(),
+    })
+    return info
+
+
+def save_mask_rectangularity_debug(
+    shot_dir: Path,
+    color_np: np.ndarray,
+    mask01: np.ndarray,
+    shape_info: dict,
+    stem: str,
+):
+    """長方形判定のデバッグ画像とJSONを保存する．"""
+    debug_dir = Path(shot_dir) / "debug_mask_shape"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+
+    mask = (np.asarray(mask01) > 0).astype(np.uint8)
+    cv2.imwrite(str(debug_dir / f"{stem}_mask_shape_input.png"), mask * 255)
+
+    img = color_np.copy()
+    overlay = img.copy()
+    overlay[mask > 0] = (0, 255, 0)
+    img = cv2.addWeighted(img, 0.70, overlay, 0.30, 0)
+
+    rect_box = shape_info.get("rect_box") if isinstance(shape_info, dict) else None
+    if rect_box is not None:
+        try:
+            pts = np.round(np.asarray(rect_box, dtype=np.float32)).astype(np.int32).reshape(-1, 1, 2)
+            cv2.polylines(img, [pts], True, (0, 0, 255), 2, cv2.LINE_AA)
+        except Exception:
+            pass
+
+    text_lines = [
+        f"clean={shape_info.get('clean_rectangle')}",
+        f"needs_refine={shape_info.get('needs_refine')}",
+        f"iou={float(shape_info.get('rotated_rect_iou', 0.0)):.3f}",
+        f"extent={float(shape_info.get('extent', 0.0)):.3f}",
+        f"solidity={float(shape_info.get('solidity', 0.0)):.3f}",
+        f"w_cv={float(shape_info.get('width_cv', 999.0)):.3f}",
+        f"w_max/med={float(shape_info.get('width_max_over_median', 999.0)):.3f}",
+    ]
+    y0 = 28
+    for i, txt in enumerate(text_lines):
+        y = y0 + i * 24
+        cv2.putText(img, txt, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 3, cv2.LINE_AA)
+        cv2.putText(img, txt, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 1, cv2.LINE_AA)
+
+    cv2.imwrite(str(debug_dir / f"{stem}_mask_shape_rectangularity.png"), img)
+    save_json(debug_dir / f"{stem}_mask_shape_rectangularity.json", shape_info)
+    print(f"✔ Saved mask rectangularity debug files: {debug_dir}")
+
+
 def save_pointcloud_screenshot(
     pts_f: np.ndarray,
     target_point: np.ndarray,
@@ -2479,38 +3633,113 @@ def run_capture_and_pca(
         sel_mask = merged["sel_mask"]
         mask01 = merged["mask01"]
 
-        # ===== OCR bbox をアンカーにしたマスク補正 =====
-        mask01_before_refine = mask01.copy()
-
-        mask01, refine_info = refine_mask_by_ocr_axis_band(
-            mask01=mask01,
-            merged=merged,
-            image_shape=color_np.shape[:2],
-            shot_dir=shot_dir,
-            query=query,
-            mask_width_ratio=0.98,
-            min_keep_ratio=0.60,
-            use_ocr_short_width=False,
-            ocr_short_to_half_width_scale=1.35,
-            min_ocr_half_width_px=28.0,
-            suppress_side_protrusions=False,
-            profile_bin_size_px=8.0,
-            profile_width_margin=1.15,
-            min_profile_half_width_px=16.0,
-            max_profile_shrink_ratio=0.35,
-            return_info=True,
+        # ===== 5.5) Depth中央値±3cm補正を先に実行 =====
+        # 目的:
+        #   SAMマスクに手前/奥のゴミが同一マスクとして含まれると，
+        #   そのまま長方形判定を行った時点で「不整形」と誤判定される．
+        #   そこで，まずDepth中央値±3cm補正を行い，Depth外れ値を0にしてから，
+        #   有効Depthが残った画素だけで長方形判定を行う．
+        mask01_before_depth_filter = mask01.copy()
+        depth_masked = save_masked_and_cropped(
+            color_np,
+            depth_np_u16,
+            mask01,
+            shot_dir,
+            f"mask{sel_idx}_depth_prefilter",
         )
+        mask01 = ((mask01 > 0) & (depth_masked > 0)).astype(np.uint8)
 
-        save_mask_refine_debug(
+        depth_prefilter_info = {
+            "enabled": True,
+            "reason": "Depth median +/- tolerance is applied before rectangularity judgement.",
+            "mask_area_before_depth_filter_px": int(mask01_before_depth_filter.sum()),
+            "mask_area_after_depth_filter_px": int(mask01.sum()),
+            "valid_depth_pixel_count": int(np.count_nonzero(depth_masked > 0)),
+            "depth_prefilter_stem": f"mask{sel_idx}_depth_prefilter",
+        }
+        save_json(shot_dir / f"mask{sel_idx}_depth_prefilter_log.json", depth_prefilter_info)
+
+        # ===== 5.6) Depth補正後マスクが長方形かを判定 =====
+        # きれいな回転長方形であれば，側面除去のための削る操作は行わない．
+        # Depth補正後でも長方形性が崩れている場合のみ，OCR軸帯補正と列長フィルタを有効化する．
+        shape_info = analyze_mask_rectangularity(
+            mask01=mask01,
+            image_shape=color_np.shape[:2],
+            iou_threshold=0.82,
+            extent_threshold=0.78,
+            solidity_threshold=0.92,
+            width_cv_threshold=0.28,
+            width_max_median_threshold=1.55,
+        )
+        shape_info["depth_prefilter"] = depth_prefilter_info
+        save_mask_rectangularity_debug(
             shot_dir=shot_dir,
             color_np=color_np,
-            mask_before=mask01_before_refine,
-            mask_after=mask01,
-            merged=merged,
-            refine_info=refine_info,
-            stem=f"mask{sel_idx}",
-            query=query,
+            mask01=mask01,
+            shape_info=shape_info,
+            stem=f"mask{sel_idx}_after_depth_prefilter",
         )
+        needs_shape_refine = bool(shape_info.get("needs_refine", True))
+
+        refine_info = {
+            "used": False,
+            "reason": "depth-filtered mask is clean rotated rectangle; OCR/column refine skipped",
+            "shape_rectangularity": shape_info,
+            "depth_prefilter": depth_prefilter_info,
+        }
+        column_info = {
+            "used": False,
+            "reason": "depth-filtered mask is clean rotated rectangle; column length refine skipped",
+            "shape_rectangularity": shape_info,
+            "depth_prefilter": depth_prefilter_info,
+        }
+
+        # ===== OCR bbox をアンカーにしたマスク補正 =====
+        if needs_shape_refine:
+            print("[MASK SHAPE] irregular mask after depth prefilter -> enable OCR/column refinement")
+            mask01_before_refine = mask01.copy()
+
+            # OCR帯補正は「軸・OCR領域の推定」とデバッグ保存にだけ使う．
+            # ここでmask01を直接更新すると，背表紙本体まで削るケースがあったため，
+            # 最終的な削除は後段のseed幅ガード付き列フィルタに任せる．
+            mask01_ocr_band_candidate, refine_info = refine_mask_by_ocr_axis_band(
+                mask01=mask01,
+                merged=merged,
+                image_shape=color_np.shape[:2],
+                shot_dir=shot_dir,
+                query=query,
+                mask_width_ratio=1.05,
+                min_keep_ratio=0.85,
+                use_ocr_short_width=False,
+                ocr_short_to_half_width_scale=1.35,
+                min_ocr_half_width_px=28.0,
+                suppress_side_protrusions=False,
+                profile_bin_size_px=8.0,
+                profile_width_margin=1.15,
+                min_profile_half_width_px=16.0,
+                max_profile_shrink_ratio=0.35,
+                return_info=True,
+            )
+            refine_info["shape_rectangularity"] = shape_info
+            refine_info["depth_prefilter"] = depth_prefilter_info
+            refine_info["mask_update_used"] = False
+            refine_info["mask_update_reason"] = "OCR band candidate is debug/axis-only; final removal is performed by seed-width-guard column filter."
+
+            save_mask_refine_debug(
+                shot_dir=shot_dir,
+                color_np=color_np,
+                mask_before=mask01_before_refine,
+                mask_after=mask01_ocr_band_candidate,
+                merged=merged,
+                refine_info=refine_info,
+                stem=f"mask{sel_idx}_ocr_band_candidate",
+                query=query,
+            )
+
+            # 重要: OCR帯候補ではmask01/depth_maskedを更新しない．
+            mask01 = mask01_before_refine.copy()
+        else:
+            print("[MASK SHAPE] depth-filtered mask is clean rotated rectangle -> skip OCR/column refinement")
 
         merge_end = time.perf_counter()
         print(f"[TIME] merge OCR+SAM      : {merge_end - merge_start:.3f} sec")
@@ -2525,46 +3754,69 @@ def run_capture_and_pca(
             draw_ids=False,
         )
 
-        # ===== 7) 対象書籍のみの RGB/Depth を保存 =====
-        # ここで従来の「Depth中央値±3cm」補正が行われる．
-        depth_masked = save_masked_and_cropped(
-            color_np, depth_np_u16, mask01, shot_dir, f"mask{sel_idx}"
-        )
+        # ===== 7) Depth補正後の点群列長さで側面を追加除去 =====
+        # 長方形性が崩れている場合のみ実行する．
+        # ここに入る時点で depth_masked はすでにDepth中央値±3cm補正済み．
+        if needs_shape_refine:
+            mask01_before_column = mask01.copy()
+            depth_masked_before_column = depth_masked.copy()
 
-        # ===== 7.5) Depth補正後の点群列長さで側面を追加除去 =====
-        # 文字領域は「対象書籍上のseed」として使い，幅を固定せず，
-        # 背表紙方向に長く連続するt列だけを残す．
-        mask01_before_column = mask01.copy()
-        depth_masked_before_column = depth_masked.copy()
+            mask01, depth_masked, column_info = refine_mask_by_spine_column_length_after_depth(
+                mask01=mask01,
+                depth_masked=depth_masked,
+                refine_info=refine_info,
+                image_shape=color_np.shape[:2],
+                t_bin_size_px=4.0,
+                s_bin_size_px=5.0,
+                s_gap_allow_px=28.0,
+                length_reference_mode="robust_percentile",
+                length_reference_percentile=85.0,
+                min_length_ratio=0.95,
+                relaxed_edge_length_ratio=0.95,
+                min_points_per_t_bin=6,
+                min_selected_t_bins=2,
+                expand_selected_t_bins=0,
+                s_margin_px=0.0,
+                min_valid_keep_ratio=0.35,
+                seed_local_window_bins=14,
+                bridge_gap_bins=2,
+                use_global_s_range=False,
+                span_percentiles=(2.0, 98.0),
+                min_occupancy_density=0.0,
+                use_seed_width_guard=True,
+                seed_width_guard_scale=1.25,
+                min_seed_guard_width_px=40.0,
+                max_seed_guard_width_px=140.0,
+                one_sided_removal=True,
+                one_sided_min_candidate_points=30,
+                one_sided_score_margin_ratio=1.05,
+                protect_ocr_extended_band=True,
+                ocr_extended_protection_margin_px=0.0,
+                return_info=True,
+            )
+            column_info["shape_rectangularity"] = shape_info
+            column_info["depth_prefilter"] = depth_prefilter_info
 
-        mask01, depth_masked, column_info = refine_mask_by_spine_column_length_after_depth(
-            mask01=mask01,
-            depth_masked=depth_masked,
-            refine_info=refine_info,
-            image_shape=color_np.shape[:2],
-            t_bin_size_px=4.0,
-            s_bin_size_px=5.0,
-            s_gap_allow_px=18.0,
-            length_reference_percentile=85.0,
-            min_length_ratio=0.65,
-            relaxed_edge_length_ratio=0.55,
-            min_points_per_t_bin=12,
-            min_selected_t_bins=2,
-            expand_selected_t_bins=0,
-            s_margin_px=8.0,
-            min_valid_keep_ratio=0.30,
-            return_info=True,
-        )
+            save_spine_column_length_debug(
+                shot_dir=shot_dir,
+                color_np=color_np,
+                mask_before=mask01_before_column,
+                mask_after=mask01,
+                depth_before=depth_masked_before_column,
+                depth_after=depth_masked,
+                column_info=column_info,
+                stem=f"mask{sel_idx}",
+            )
+        else:
+            print("[MASK SHAPE] skip column length refinement because depth-filtered mask is rectangular")
 
-        save_spine_column_length_debug(
-            shot_dir=shot_dir,
-            color_np=color_np,
-            mask_before=mask01_before_column,
-            mask_after=mask01,
-            depth_before=depth_masked_before_column,
-            depth_after=depth_masked,
-            column_info=column_info,
-            stem=f"mask{sel_idx}",
+        # ===== 7.5) 最終的に点群化に使う RGB/Depth/Mask を従来名で保存 =====
+        depth_masked = save_existing_mask_and_depth(
+            color_np,
+            depth_masked,
+            mask01,
+            shot_dir,
+            f"mask{sel_idx}",
         )
 
         # ===== 8) マスク + depth → カメラ座標点群へ変換 =====
@@ -2599,24 +3851,47 @@ def run_capture_and_pca(
         else:
             theta_rad = float(np.arctan2(vy, vx))  # 基準は +x 軸
 
-        book_width_info = estimate_book_width(pts_f, mean, pc1, pc2)
-        book_width = book_width_info.get("av_book_width_m")
+        if needs_shape_refine:
+            book_width, book_width_info = estimate_book_width_from_filtered_mask_axis(
+                mask01=mask01,
+                depth_masked=depth_masked,
+                intr=intr,
+                depth_scale=depth_scale,
+                column_info=column_info,
+                refine_info=refine_info,
+            )
+            if book_width is None:
+                # フォールバック: 既存の3D PCAベース推定
+                book_width_info = estimate_book_width(pts_f, mean, pc1, pc2)
+                book_width = book_width_info.get("av_book_width_m")
+                if isinstance(book_width_info, dict):
+                    book_width_info["fallback_method"] = "estimate_book_width_3d_pca"
+        else:
+            # 長方形マスクでは削る操作を入れず，従来の点群幅推定を使う．
+            book_width_info = estimate_book_width(pts_f, mean, pc1, pc2)
+            book_width = book_width_info.get("av_book_width_m")
+            if isinstance(book_width_info, dict):
+                book_width_info["method"] = "estimate_book_width_3d_pca_rectangular_mask_no_refine"
+                book_width_info["shape_rectangularity"] = shape_info
 
         # ===== 11) 把持位置導出 =====
         target_point_info = find_target_point(pts_f)
         target_point = target_point_info.get("target_m")
 
-        # ===== 12) 可視化 =====
-        visualize_points_and_target_open3d(pts_f, target_point)
+        # # ===== 12) 可視化 =====
+        # try:
+        #     visualize_points_and_target_open3d(pts_f, target_point)
+        # except Exception as e:
+        #     print(f"⚠ Open3D visualization skipped: {e}")
 
-        # ===== 12.5) 点群ビューのスクリーンショット保存 =====
-        vis_img_path = shot_dir / "pointcloud_view.png"
-        save_pointcloud_screenshot(
-            pts_f=pts_f,
-            target_point=target_point,
-            save_path=vis_img_path,
-            show_window=False,
-        )
+        # # ===== 12.5) 点群ビューのスクリーンショット保存 =====
+        # vis_img_path = shot_dir / "pointcloud_view.png"
+        # save_pointcloud_screenshot(
+        #     pts_f=pts_f,
+        #     target_point=target_point,
+        #     save_path=vis_img_path,
+        #     show_window=False,
+        # )
 
         # ===== 13) PCA結果保存 =====
         print(":heavy_check_mark: PCA result:")
@@ -2629,6 +3904,7 @@ def run_capture_and_pca(
             "theta_deg": float(np.degrees(theta_rad)),
             "p_min_m": [float(x) for x in np.asarray(target_point).reshape(-1)],
             "book_width_mm": float(book_width * 1000.0),  # book_width は [m] 想定
+            "book_width_info": book_width_info,
         }
 
         json_path = Path(shot_dir) / "pca_result.json"
@@ -2728,38 +4004,108 @@ def run_capture_and_pca_offline(
     sel_mask = merged["sel_mask"]
     mask01 = merged["mask01"]
 
-    # ===== OCR bbox をアンカーにしたマスク補正 =====
-    mask01_before_refine = mask01.copy()
-
-    mask01, refine_info = refine_mask_by_ocr_axis_band(
-        mask01=mask01,
-        merged=merged,
-        image_shape=color_np.shape[:2],
-        shot_dir=shot_dir,
-        query=query,
-        mask_width_ratio=0.98,
-        min_keep_ratio=0.60,
-        use_ocr_short_width=False,
-        ocr_short_to_half_width_scale=1.35,
-        min_ocr_half_width_px=28.0,
-        suppress_side_protrusions=False,
-        profile_bin_size_px=8.0,
-        profile_width_margin=1.15,
-        min_profile_half_width_px=16.0,
-        max_profile_shrink_ratio=0.35,
-        return_info=True,
+    # ===== 4.5) Depth中央値±3cm補正を先に実行 =====
+    # SAMマスクに手前/奥のゴミが同一マスクとして入ると，
+    # 長方形判定だけが過敏に崩れるため，Depth外れ値を先に除去する．
+    mask01_before_depth_filter = mask01.copy()
+    depth_masked = save_masked_and_cropped(
+        color_np,
+        depth_np_u16,
+        mask01,
+        shot_dir,
+        f"mask{sel_idx}_offline_depth_prefilter",
     )
+    mask01 = ((mask01 > 0) & (depth_masked > 0)).astype(np.uint8)
 
-    save_mask_refine_debug(
+    depth_prefilter_info = {
+        "enabled": True,
+        "reason": "Depth median +/- tolerance is applied before rectangularity judgement.",
+        "mask_area_before_depth_filter_px": int(mask01_before_depth_filter.sum()),
+        "mask_area_after_depth_filter_px": int(mask01.sum()),
+        "valid_depth_pixel_count": int(np.count_nonzero(depth_masked > 0)),
+        "depth_prefilter_stem": f"mask{sel_idx}_offline_depth_prefilter",
+    }
+    save_json(shot_dir / f"mask{sel_idx}_offline_depth_prefilter_log.json", depth_prefilter_info)
+
+    # ===== 4.6) Depth補正後マスクが長方形かを判定 =====
+    shape_info = analyze_mask_rectangularity(
+        mask01=mask01,
+        image_shape=color_np.shape[:2],
+        iou_threshold=0.82,
+        extent_threshold=0.78,
+        solidity_threshold=0.92,
+        width_cv_threshold=0.28,
+        width_max_median_threshold=1.55,
+    )
+    shape_info["depth_prefilter"] = depth_prefilter_info
+    save_mask_rectangularity_debug(
         shot_dir=shot_dir,
         color_np=color_np,
-        mask_before=mask01_before_refine,
-        mask_after=mask01,
-        merged=merged,
-        refine_info=refine_info,
-        stem=f"mask{sel_idx}_offline",
-        query=query,
+        mask01=mask01,
+        shape_info=shape_info,
+        stem=f"mask{sel_idx}_offline_after_depth_prefilter",
     )
+    needs_shape_refine = bool(shape_info.get("needs_refine", True))
+
+    refine_info = {
+        "used": False,
+        "reason": "depth-filtered mask is clean rotated rectangle; OCR/column refine skipped",
+        "shape_rectangularity": shape_info,
+        "depth_prefilter": depth_prefilter_info,
+    }
+    column_info = {
+        "used": False,
+        "reason": "depth-filtered mask is clean rotated rectangle; column length refine skipped",
+        "shape_rectangularity": shape_info,
+        "depth_prefilter": depth_prefilter_info,
+    }
+
+    # ===== OCR bbox をアンカーにしたマスク補正 =====
+    if needs_shape_refine:
+        print("[MASK SHAPE][OFFLINE] irregular mask after depth prefilter -> enable OCR/column refinement")
+        mask01_before_refine = mask01.copy()
+
+        # OCR帯補正は「軸・OCR領域の推定」とデバッグ保存にだけ使う．
+        # ここでmask01を直接更新すると，背表紙本体まで削るケースがあったため，
+        # 最終的な削除は後段のseed幅ガード付き列フィルタに任せる．
+        mask01_ocr_band_candidate, refine_info = refine_mask_by_ocr_axis_band(
+            mask01=mask01,
+            merged=merged,
+            image_shape=color_np.shape[:2],
+            shot_dir=shot_dir,
+            query=query,
+            mask_width_ratio=1.05,
+            min_keep_ratio=0.85,
+            use_ocr_short_width=False,
+            ocr_short_to_half_width_scale=1.35,
+            min_ocr_half_width_px=28.0,
+            suppress_side_protrusions=False,
+            profile_bin_size_px=8.0,
+            profile_width_margin=1.15,
+            min_profile_half_width_px=16.0,
+            max_profile_shrink_ratio=0.35,
+            return_info=True,
+        )
+        refine_info["shape_rectangularity"] = shape_info
+        refine_info["depth_prefilter"] = depth_prefilter_info
+        refine_info["mask_update_used"] = False
+        refine_info["mask_update_reason"] = "OCR band candidate is debug/axis-only; final removal is performed by seed-width-guard column filter."
+
+        save_mask_refine_debug(
+            shot_dir=shot_dir,
+            color_np=color_np,
+            mask_before=mask01_before_refine,
+            mask_after=mask01_ocr_band_candidate,
+            merged=merged,
+            refine_info=refine_info,
+            stem=f"mask{sel_idx}_offline_ocr_band_candidate",
+            query=query,
+        )
+
+        # 重要: OCR帯候補ではmask01/depth_maskedを更新しない．
+        mask01 = mask01_before_refine.copy()
+    else:
+        print("[MASK SHAPE][OFFLINE] depth-filtered mask is clean rotated rectangle -> skip OCR/column refinement")
 
     merge_end = time.perf_counter()
     print(f"[TIME][OFFLINE] merge OCR+SAM: {merge_end - merge_start:.3f} sec")
@@ -2774,46 +4120,69 @@ def run_capture_and_pca_offline(
         draw_ids=False,
     )
 
-    # ===== 6) マスクDepth保存 =====
-    # ここで従来の「Depth中央値±3cm」補正が行われる．
-    depth_masked = save_masked_and_cropped(
-        color_np, depth_np_u16, mask01, shot_dir, f"mask{sel_idx}_offline"
-    )
+    # ===== 6) Depth補正後の点群列長さで側面を追加除去 =====
+    # 長方形性が崩れている場合のみ実行する．
+    # ここに入る時点で depth_masked はすでにDepth中央値±3cm補正済み．
+    if needs_shape_refine:
+        mask01_before_column = mask01.copy()
+        depth_masked_before_column = depth_masked.copy()
 
-    # ===== 6.5) Depth補正後の点群列長さで側面を追加除去 =====
-    # 文字領域は「対象書籍上のseed」として使い，幅を固定せず，
-    # 背表紙方向に長く連続するt列だけを残す．
-    mask01_before_column = mask01.copy()
-    depth_masked_before_column = depth_masked.copy()
+        mask01, depth_masked, column_info = refine_mask_by_spine_column_length_after_depth(
+            mask01=mask01,
+            depth_masked=depth_masked,
+            refine_info=refine_info,
+            image_shape=color_np.shape[:2],
+            t_bin_size_px=4.0,
+            s_bin_size_px=5.0,
+            s_gap_allow_px=28.0,
+            length_reference_mode="robust_percentile",
+            length_reference_percentile=85.0,
+            min_length_ratio=0.95,
+            relaxed_edge_length_ratio=0.95,
+            min_points_per_t_bin=6,
+            min_selected_t_bins=2,
+            expand_selected_t_bins=0,
+            s_margin_px=0.0,
+            min_valid_keep_ratio=0.35,
+            seed_local_window_bins=14,
+            bridge_gap_bins=2,
+            use_global_s_range=False,
+            span_percentiles=(2.0, 98.0),
+            min_occupancy_density=0.0,
+            use_seed_width_guard=False,
+            seed_width_guard_scale=1.25,
+            min_seed_guard_width_px=40.0,
+            max_seed_guard_width_px=140.0,
+            one_sided_removal=True,
+            one_sided_min_candidate_points=30,
+            one_sided_score_margin_ratio=1.05,
+            protect_ocr_extended_band=True,
+            ocr_extended_protection_margin_px=0.0,
+            return_info=True,
+        )
+        column_info["shape_rectangularity"] = shape_info
+        column_info["depth_prefilter"] = depth_prefilter_info
 
-    mask01, depth_masked, column_info = refine_mask_by_spine_column_length_after_depth(
-        mask01=mask01,
-        depth_masked=depth_masked,
-        refine_info=refine_info,
-        image_shape=color_np.shape[:2],
-        t_bin_size_px=4.0,
-        s_bin_size_px=5.0,
-        s_gap_allow_px=18.0,
-        length_reference_percentile=85.0,
-        min_length_ratio=0.65,
-        relaxed_edge_length_ratio=0.55,
-        min_points_per_t_bin=12,
-        min_selected_t_bins=2,
-        expand_selected_t_bins=0,
-        s_margin_px=8.0,
-        min_valid_keep_ratio=0.30,
-        return_info=True,
-    )
+        save_spine_column_length_debug(
+            shot_dir=shot_dir,
+            color_np=color_np,
+            mask_before=mask01_before_column,
+            mask_after=mask01,
+            depth_before=depth_masked_before_column,
+            depth_after=depth_masked,
+            column_info=column_info,
+            stem=f"mask{sel_idx}_offline",
+        )
+    else:
+        print("[MASK SHAPE][OFFLINE] skip column length refinement because depth-filtered mask is rectangular")
 
-    save_spine_column_length_debug(
-        shot_dir=shot_dir,
-        color_np=color_np,
-        mask_before=mask01_before_column,
-        mask_after=mask01,
-        depth_before=depth_masked_before_column,
-        depth_after=depth_masked,
-        column_info=column_info,
-        stem=f"mask{sel_idx}_offline",
+    # ===== 6.5) 最終的に点群化に使う RGB/Depth/Mask を従来名で保存 =====
+    depth_masked = save_existing_mask_and_depth(
+        color_np,
+        depth_masked,
+        mask01,
+        shot_dir,
+        f"mask{sel_idx}_offline",
     )
 
     # ===== 7) 点群化 =====
@@ -2846,34 +4215,58 @@ def run_capture_and_pca_offline(
     else:
         theta_rad = float(np.arctan2(vy, vx))
 
-    book_width_info = estimate_book_width(pts_f, mean, pc1, pc2)
-    book_width = book_width_info.get("av_book_width_m")
+    if needs_shape_refine:
+        book_width, book_width_info = estimate_book_width_from_filtered_mask_axis(
+            mask01=mask01,
+            depth_masked=depth_masked,
+            intr=intr,
+            depth_scale=depth_scale,
+            column_info=column_info,
+            refine_info=refine_info,
+        )
+        if book_width is None:
+            # フォールバック: 既存の3D PCAベース推定
+            book_width_info = estimate_book_width(pts_f, mean, pc1, pc2)
+            book_width = book_width_info.get("av_book_width_m")
+            if isinstance(book_width_info, dict):
+                book_width_info["fallback_method"] = "estimate_book_width_3d_pca"
+    else:
+        # 長方形マスクでは削る操作を入れず，従来の点群幅推定を使う．
+        book_width_info = estimate_book_width(pts_f, mean, pc1, pc2)
+        book_width = book_width_info.get("av_book_width_m")
+        if isinstance(book_width_info, dict):
+            book_width_info["method"] = "estimate_book_width_3d_pca_rectangular_mask_no_refine"
+            book_width_info["shape_rectangularity"] = shape_info
 
     # ===== 9) 把持位置 =====
     target_point_info = find_target_point(pts_f)
     target_point = target_point_info.get("target_m")
 
     # ===== 10) 可視化 =====
-    visualize_points_and_target_open3d(pts_f, target_point)
+    # try:
+    #     visualize_points_and_target_open3d(pts_f, target_point)
+    # except Exception as e:
+    #     print(f"⚠ Open3D visualization skipped: {e}")
 
-    vis_img_path = shot_dir / "pointcloud_view_offline.png"
-    save_pointcloud_screenshot(
-        pts_f=pts_f,
-        target_point=target_point,
-        save_path=vis_img_path,
-        show_window=False,
-    )
+    # vis_img_path = shot_dir / "pointcloud_view_offline.png"
+    # save_pointcloud_screenshot(
+    #     pts_f=pts_f,
+    #     target_point=target_point,
+    #     save_path=vis_img_path,
+    #     show_window=False,
+    # )
 
-    print(":heavy_check_mark: [OFFLINE] PCA result:")
-    print(f"  theta_rad = {theta_rad:.6f}")
-    print(f"  p_min = {target_point}")
-    print(":heavy_check_mark: Files saved under:", shot_dir)
+    # print(":heavy_check_mark: [OFFLINE] PCA result:")
+    # print(f"  theta_rad = {theta_rad:.6f}")
+    # print(f"  p_min = {target_point}")
+    # print(":heavy_check_mark: Files saved under:", shot_dir)
 
     pca_json = {
         "theta_rad": float(theta_rad),
         "theta_deg": float(np.degrees(theta_rad)),
         "p_min_m": [float(x) for x in np.asarray(target_point).reshape(-1)],
         "book_width_mm": float(book_width * 1000.0),
+        "book_width_info": book_width_info,
     }
     json_path = shot_dir / "pca_result_offline.json"
     json_path.write_text(json.dumps(pca_json, ensure_ascii=False, indent=2), encoding="utf-8")
