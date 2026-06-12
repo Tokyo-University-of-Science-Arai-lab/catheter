@@ -162,7 +162,7 @@
 #     encoder_path: str = "models/sam_vit_h_4b8939.encoder.onnx"
 #     decoder_path: str = "models/sam_vit_h_4b8939.decoder.onnx"
 #     device: str = "gpu"
-#     target_len: int = 768
+#     target_len: int = 1024
 #     pts_side: Union[int, Tuple[int,int]] = (48, 12)
 #     min_area: int = 500
 #     iou_thr: float = 0.8
@@ -853,7 +853,7 @@ class SamConfig:
     encoder_path: str = "models/sam_vit_h_4b8939.encoder.onnx"
     decoder_path: str = "models/sam_vit_h_4b8939.decoder.onnx"
     device: str = "gpu"
-    target_len: int = 768
+    target_len: int = 1024
 
     # Dense grid prompt settings.
     # 既存値は (48, 12) = 576点．candidate_gen はほぼこの点数に比例する．
@@ -868,7 +868,7 @@ class SamConfig:
     decoder_k_keep: int = 3
     lowres_dist_thr: float = 0.98
     grid_margin_px: float = 5.0
-    min_area_floor: int = 3000
+    min_area_floor: int = 500  # 3000は厳しすぎる場合があるため、小さくしてテストする
 
     # ---- AMG crop settings ----
     crop_overlap_ratio: float = 0.34       # 0..0.5 目安
@@ -1008,6 +1008,9 @@ class SamBatchInfer_storage:
                 ):
                     if c["area"] >= MIN_AREA:
                         cands.append(c)
+
+        if len(cands) == 0:
+            print(f"[DEBUG] No candidates found. MIN_AREA was {MIN_AREA}. Check pts_side or image content.")
 
         print(
             f"[SAM2 FAST] grid={len(xs)}x{len(ys)} "

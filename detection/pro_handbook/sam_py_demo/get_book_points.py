@@ -6693,7 +6693,7 @@ def _make_sam_config_compat(
     *,
     sam_pts_side: tuple[int, int] = (32, 8),
     sam_decoder_k_keep: int = 1,
-    sam_target_len: int = 768,
+    sam_target_len: int = 1024,
 ):
     """
     infer_for_storage.py の版によって SamConfig の引数が異なるため，
@@ -6723,7 +6723,7 @@ def _get_sam_runner_compat(
     *,
     sam_pts_side: tuple[int, int] = (32, 8),
     sam_decoder_k_keep: int = 1,
-    sam_target_len: int = 768,
+    sam_target_len: int = 1024,
     use_cache: bool = True,
 ):
     key = (
@@ -7554,7 +7554,7 @@ def _run_recognition_core_like_offline(
     use_persistent_runtime: bool = True,
     sam_pts_side: tuple[int, int] = (32, 8),
     sam_decoder_k_keep: int = 1,
-    sam_target_len: int = 768,
+    sam_target_len: int = 1024,
     depth_merge_tolerance_raw: int = 30,
     show_pointcloud_gui: bool = False,
     save_pointcloud_debug: bool = False,
@@ -8173,7 +8173,7 @@ def run_capture_and_pca(
     use_persistent_runtime: bool = True,
     sam_pts_side: tuple[int, int] = (32, 8),
     sam_decoder_k_keep: int = 1,
-    sam_target_len: int = 768,
+    sam_target_len: int = 1024,
     depth_merge_tolerance_raw: int = 30,
     show_pointcloud_gui: bool = False,
     save_pointcloud_debug: bool = False,
@@ -8248,7 +8248,7 @@ def run_capture_and_pca_offline(
     use_persistent_runtime: bool = True,
     sam_pts_side: tuple[int, int] = (32, 8),
     sam_decoder_k_keep: int = 1,
-    sam_target_len: int = 768,
+    sam_target_len: int = 1024,
     depth_merge_tolerance_raw: int = 30,
     show_pointcloud_gui: bool = False,
     save_pointcloud_debug: bool = False,

@@ -87,3 +87,29 @@ ipv4.gateway 192.168.1.1 \
 ipv4.dns "192.168.1.1 8.8.8.8" \
 ipv4.ignore-auto-dns yes
 
+
+
+###############################################
+cd ~/pro_book/pro_hand_book_python
+source .pro_hand_book_fixed/bin/activate
+
+
+python Retrieval_integration.py
+
+
+ros2 topic pub --once /shelf_id std_msgs/String "{data: '2-5-1-1'}"
+ros2 topic pub --once /navigation_goal_final std_msgs/msg/Bool "{data: true}"
+
+
+python -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
+
+source /opt/ros/humble/setup.bash
+source ros2_ws/install/setup.bash
+
+
+################
+#新しい方のpcへの接続
+ssh book@192.168.1.44
+
+source .paadle_ocr/bin/activate
+

@@ -1,6 +1,6 @@
 robot:
   xarm:
-    host: 192.168.2.197
+    host: 192.168.2.221
 
 books:
   master_file: master_20260216.json  #master_20260225_tohan.json

@@ -1,0 +1,14 @@
+ros-humble-desktop
+python3-rosdep
+python3-colcon-common-extensions
+ros-humble-angles
+ros-humble-rclpy
+ros-humble-control-msgs
+ros-humble-geometry-msgs
+ros-humble-sensor-msgs
+ros-humble-std-msgs
+ros-humble-std-srvs
+ros-humble-tf2-ros-py
+ros-humble-tf2-geometry-msgs
+ros-humble-tf2-tools
+ros-humble-rqt-common-plugins

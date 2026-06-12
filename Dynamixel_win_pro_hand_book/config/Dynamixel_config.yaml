@@ -1,5 +1,5 @@
 id:
-  port: '/dev/book_hand' # linux
+  port: '/dev/ttyUSB0' # linux
   baudrate: 57600
   gripper: 1
   spacer_rot: 2
