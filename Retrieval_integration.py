@@ -11,7 +11,7 @@ from detection.pro_handbook.sam_py_demo.bar_code.bookshelf_barcode import booksh
 from xarm7.control.book_return_sequence import storage_sequence
 from detection.pro_handbook.sam_py_demo.Storage import run_capture_and_pca_depth_space
 from linear_lift import TargetPublisher
-import rclpy
+import rclpy #type: ignore
 import cv2
 import numpy as np
 import json
@@ -584,7 +584,7 @@ def main():
                 book_width_offset=book_width_offset,
                 tp=tp,
                 node=node,
-                arm=arm, 
+                arm=arm, #
                 monitor=monitor,
                 executor=executor,
                 waypoint_node=waypoint_node,   
