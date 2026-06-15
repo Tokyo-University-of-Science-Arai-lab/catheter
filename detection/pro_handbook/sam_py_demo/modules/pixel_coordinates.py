@@ -2,7 +2,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Tuple, Iterable
+from typing import Tuple, Iterable, Optional
 import numpy as np
 import cv2
 
@@ -46,21 +46,21 @@ def mask_right_and_left(
     u8 = _ensure_u8_mask(m)
     H, W = u8.shape[:2]
 
-    cnts, _ = cv2.findContours(u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts, _ = cv2.findContours(u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) #輪郭全部抽出
     if not cnts:
         return (0, 0), (0, 0)
 
     # 最大輪郭を使用
-    cnt = max(cnts, key=cv2.contourArea)
+    cnt = max(cnts, key=cv2.contourArea) #最大の輪郭を選択
 
     # 回転外接矩形と、その中心 y を使用
-    (cx, cy), (w, h), ang = cv2.minAreaRect(cnt)
-    box = cv2.boxPoints(((cx, cy), (w, h), ang)).astype(np.float32)
+    (cx, cy), (w, h), ang = cv2.minAreaRect(cnt) #回転外接矩形を求める cx,cyは中心座標 w,hは幅と高さ angは回転角
+    box = cv2.boxPoints(((cx, cy), (w, h), ang)).astype(np.float32) #回転外接矩形の4頂点座標を求める　shapeは(4,2)で、順番は時計回りで左上から
 
     # 水平ライン y を矩形中心に設定
     y = int(np.clip(round(cy), 0, H - 1))
 
-    def _intersections_with_horizontal_y(y_val: int) -> list[float]:
+    def _intersections_with_horizontal_y(y_val: int) -> list[float]: #水平ライン y_val と矩形の辺との交点の x 座標を求める　shapeはリストで、交点がなければ空
         xs: list[float] = []
         for i in range(4):
             x0, y0 = box[i]
@@ -79,7 +79,7 @@ def mask_right_and_left(
         return xs
 
     # 1) 矩形と水平線の交点から (xL, xR) を優先的に取る
-    xs = _intersections_with_horizontal_y(y)
+    xs = _intersections_with_horizontal_y(y) 
     if prefer_rect_slice and len(xs) >= 2:
         x_left_f  = float(np.min(xs))
         x_right_f = float(np.max(xs))
@@ -100,7 +100,7 @@ def mask_right_and_left(
         return (0, 0), (0, 0)
     xL = int(xs_mask.min())
     xR = int(xs_mask.max())
-    return xL,xR
+    return (xL, y), (xR, y)
 
 
 # modules/pixel_coordinates.py

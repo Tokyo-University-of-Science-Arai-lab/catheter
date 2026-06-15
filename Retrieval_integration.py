@@ -186,30 +186,8 @@ def main_sequence(
             node.get_logger().warn("wall_distance not received. Using default 0.25m")
             wall_distance = 0.25
 
-        # ==============================
-        # self-localization
-        # ==============================
-        # detected2, code_str, info = capture_barcode_and_x_offset(
-        #     node=node,
-        #     executor=executor,
-        #     shot_dir=bar_dir,
-        #     barcode_number=None,
-        #     fx_px=2500.0,
-        #     depth_m= 0.8 - wall_distance - 0.13 , # 0.8 : 通路幅， 0.13 : AMR中心からカメラまでの距離
-        #     v_x=0.01,        # 好きな低速
-        #     cmd_sign_x=1.0,  # 逆なら -1.0
-        # )
-
-        # ==============================
-        # wall_distance watcher
-        # ==============================
         wall_watcher = WallDistanceWatcher(node)
 
-        # ==============================
-        # navigation_goal / navigation_goal_final watchers
-        # ==============================
-        nav_goal_pulse = BoolPulseWatcher(node, "/navigation_goal")
-        final_goal = BoolLatchWatcher(node, "/navigation_goal_final")
 
         node.get_logger().info("Start self-localization loop: wait /navigation_goal pulses until /navigation_goal_final==True")
 
@@ -218,54 +196,6 @@ def main_sequence(
         bar_dir = Path("/home/book/pro_book/pro_hand_book_python/captures/bookshelf_barcode")
         bar_dir.mkdir(parents=True, exist_ok=True)
 
-        detected2 = False
-        label_str = None
-        info = None
-
-        # while rclpy.ok() and not final_goal.is_true():
-        #     executor.spin_once(timeout_sec=0.1)
-
-        #     # /navigation_goal=True を受けるまで待つ
-        #     if not nav_goal_pulse.consume():
-        #         continue
-
-        #     node.get_logger().info(
-        #         "[bookshelf barcode] /navigation_goal received -> start self-localization"
-        #     )
-
-        #     wall_distance = wall_watcher.get_distance()
-        #     if wall_distance is None:
-        #         node.get_logger().warn("wall_distance not received. Using default 0.25m")
-        #         wall_distance = 0.25
-
-        #     detected2, label_str, info = capture_barcode_and_x_offset(
-        #         node=node,
-        #         executor=executor,
-        #         shot_dir=bar_dir,
-        #         fx_px=2500.0,
-        #         depth_m=0.8 - wall_distance - 0.13,
-        #         v_x=0.05,
-        #         min_search_vx=0.02,
-        #         max_search_vx=0.07,
-        #         k_p_search=0.00008,
-        #         cmd_sign_x=1.0,
-        #         align_thresh_px=10.0,
-        #         wait_navigation_goal=False,   # 外で待っているので False
-        #         total_timeout_sec=1000.0,
-        #         ocr_interval_sec=0.25,
-        #         bbox_lost_grace_sec=0.5,
-        #     )
-
-        #     if detected2 and info is not None:
-        #         node.get_logger().info(
-        #             f"[bookshelf barcode] self-localization OK: X_offset={info['X_m']:.3f} [m]"
-        #         )
-        #     else:
-        #         node.get_logger().warn(
-        #             "[bookshelf barcode] self-localization failed"
-        #         )
-
-        # ==============================
         # init → capture 姿勢へ（Waypoint）
         node.get_logger().info("Waiting for manual /navigation_goal_final")
 
@@ -374,9 +304,7 @@ def main_sequence(
                 safe_motion(lambda: arm.moveL_to_insert_right(), monitor, "insert_right")    #書籍背表紙位置まで挿入
                 HandBook_retrieval.grasp(HandMotors_retrieval)              #ハンドを閉じる
                 safe_motion(lambda: arm.moveL_post_grasp_right() , monitor, "retreave_right")   #書籍を引き抜く
-                #arm.move_tcp_execute(dx=0.2675, executor=executor)
-
-                               
+                #arm.move_tcp_execute(dx=0.2675, executor=executor)             
             else:
                 safe_motion(lambda: arm.moveL_to_insert_left(), monitor, "insert_left")         #書籍背表紙位置まで挿入
                 HandBook_retrieval.grasp(HandMotors_retrieval)              #ハンドを閉じる
@@ -468,8 +396,7 @@ def main_sequence(
         
         tp.publish_target_mm(config["linear_lift"]["move_to_container"])
         rclpy.spin_once(tp, timeout_sec=0.1)
-
-       #-----------------------コンテナ収納動作-----------------------------------------
+#-----------------------コンテナ収納動作-----------------------------------------
         try:
             safe_motion(lambda: Move_to_Container(book_width_offset, arm, waypoint_node, HandMotors_retrieval), monitor, "Move_to_container")  
         except Exception:
