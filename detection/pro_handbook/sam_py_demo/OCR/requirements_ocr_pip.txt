@@ -16,7 +16,7 @@ hf-xet==1.2.0
 httpcore==1.0.9
 httpx==0.28.1
 huggingface_hub==1.2.3
-iai-cylinder==0.0.0
+
 idna==3.11
 imagesize==1.4.1
 modelscope==1.33.0
@@ -79,3 +79,5 @@ tzdata==2025.3
 ujson==5.11.0
 urllib3==2.6.2
 wcwidth==0.2.14
+
+#iai-cylinder==0.0.0

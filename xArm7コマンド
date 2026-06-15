@@ -111,5 +111,6 @@ source ros2_ws/install/setup.bash
 #新しい方のpcへの接続
 ssh book@192.168.1.44
 
+cd ~/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR
 source .paadle_ocr/bin/activate
 

@@ -62,6 +62,7 @@ endif()
 
 include_directories(
   ${CXX_SDK_INC}
+  ${CXX_SDK_SRC}
   ${ament_INCLUDE_DIRS}
 )
 
