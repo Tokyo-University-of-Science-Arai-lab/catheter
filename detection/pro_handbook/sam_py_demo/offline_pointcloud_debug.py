@@ -5,10 +5,10 @@ import time
 import traceback
 
 
-QUERY = "WMS導入と運用のための99の極意[第2版]"
+QUERY = "Target XL"
 
 # 必ず絶対パスにする
-SHOT_DIR = Path("/home/book/pro_book/pro_hand_book_python/captures/20260409_165212").resolve()
+SHOT_DIR = Path("/home/book/pro_book/pro_hand_book_python/captures/20260616_165547").resolve()
 
 SAM_DEVICE = "gpu"
 NUM_RUNS = 11

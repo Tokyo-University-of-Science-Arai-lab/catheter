@@ -39,7 +39,7 @@ def make_inst():
     inst.serial.bytesize = 8
     inst.serial.parity   = serial.PARITY_NONE
     inst.serial.stopbits = 1
-    inst.serial.timeout  = 0.3
+    inst.serial.timeout  = 2.0
     inst.clear_buffers_before_each_transaction = True
     return inst
 

@@ -39,6 +39,9 @@ def keep_max_rectangularity_per_pixel_rotated(
     メモリ:  既定は (N,H,W) のブールスタックを使用。chunk_rows 指定で等価に省メモリ。
     """
     
+    if not masks:
+        return []
+
     H, W = masks[0].shape
     for m in masks:
         if m.shape != (H, W):
