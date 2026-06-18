@@ -40,6 +40,7 @@ extern "C" {
 #endif
 
 #include "xarm/core/os/network.h"
+#include "xarm/core/utils/log.h"
 
 #if !defined(SOL_TCP) && defined(IPPROTO_TCP)
 #define SOL_TCP IPPROTO_TCP
@@ -49,7 +50,7 @@ extern "C" {
 #endif
 
 #define DB_FLG "[net work] "
-#define PRINT_ERR printf
+#define PRINT_ERR XARM_LOG_ERROR
 
 #ifdef _WIN32
 #define PERRNO(ret, db_flg, str)        \
@@ -73,15 +74,15 @@ extern "C" {
 
 #ifdef _WIN32
 
-int socket_init(char *local_ip, int port, int is_server) {
+int socket_init(const char *local_ip, const int port, int is_server) {
   // int iResult;
   // WSADATA wsaData;
   // iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
   // if (iResult != 0) {
-  // 	printf("WSAStartup failed: %d\n", iResult);
+  // 	XARM_LOG_ERROR("WSAStartup failed: %d\n", iResult);
   // 	return -1;
   // }
-  // struct addrinfo *result = NULL, *ptr = NULL, hints;
+  // struct addrinfo *result = nullptr, *ptr = nullptr, hints;
   // ZeroMemory(&hints, sizeof(hints));
   // hints.ai_family = AF_INET; // AF_UNSPEC;
   // hints.ai_socktype = SOCK_STREAM;
@@ -89,7 +90,7 @@ int socket_init(char *local_ip, int port, int is_server) {
   // if (is_server) hints.ai_flags = AI_PASSIVE;
   // iResult = getaddrinfo(local_ip, port, &hints, &result);
   // if (iResult != 0) {
-  // 	printf("getaddrinfo failed: %d\n", iResult);
+  // 	XARM_LOG_ERROR("getaddrinfo failed: %d\n", iResult);
   // 	WSACleanup();
   // 	return -1;
   // }
@@ -101,7 +102,7 @@ int socket_init(char *local_ip, int port, int is_server) {
   // // Create a SOCKET for connecting to server
   // sockfd = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
   // if (sockfd == INVALID_SOCKET) {
-  // 	printf("Error at socket(): %ld\n", WSAGetLastError());
+  // 	XARM_LOG_ERROR("Error at socket(): %ld\n", WSAGetLastError());
   // 	freeaddrinfo(result);
   // 	WSACleanup();
   // 	return -1;
@@ -109,7 +110,7 @@ int socket_init(char *local_ip, int port, int is_server) {
   // if (is_server) {
   // 	iResult = bind(sockfd, result->ai_addr, (int)result->ai_addrlen);
   // 	if (iResult == SOCKET_ERROR) {
-  // 		printf("bind failed with error: %d\n", WSAGetLastError());
+  // 		XARM_LOG_ERROR("bind failed with error: %d\n", WSAGetLastError());
   // 		freeaddrinfo(result);
   // 		closesocket(sockfd);
   // 		WSACleanup();
@@ -144,7 +145,7 @@ int socket_init(char *local_ip, int port, int is_server) {
   alive_in.onoff = 1;
   unsigned long ulBytesReturn = 0;
   ret = WSAIoctl(sockfd, SIO_KEEPALIVE_VALS, &alive_in, sizeof(alive_in),
-    &alive_out, sizeof(alive_out), &ulBytesReturn, NULL, NULL);
+    &alive_out, sizeof(alive_out), &ulBytesReturn, nullptr, nullptr);
   if (ret == SOCKET_ERROR)
   {
     PERRNO(ret, DB_FLG, "Error: WSAIoctl failed");
@@ -179,15 +180,14 @@ int socket_init(char *local_ip, int port, int is_server) {
   return sockfd;
 }
 
-int socket_connect_server(int *socket, char server_ip[], int server_port) {
+int socket_connect_server(int *socket, const char server_ip[], const int server_port) {
   struct sockaddr_in server_addr;
   server_addr.sin_family = AF_INET;
   server_addr.sin_port = htons(server_port);
   //inet_aton(server_ip, &server_addr.sin_addr);
   inet_pton(AF_INET, server_ip, &server_addr.sin_addr);
   //InetPton(AF_INET, server_ip, &server_addr.sin_addr);
-  int ret =
-    connect(*socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
+  int ret = connect(*socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
   PERRNO(ret, DB_FLG, "Error: connect");
   return 0;
 }
@@ -200,7 +200,7 @@ int socket_send_data(int client_fp, unsigned char *data, int len) {
 
 #else
 
-int socket_init(char *local_ip, int port, int is_server) {
+int socket_init(const char *local_ip, const int port, int is_server) {
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
   PERRNO(sockfd, DB_FLG, "Error: socket");
 
@@ -244,13 +244,12 @@ int socket_init(char *local_ip, int port, int is_server) {
   return sockfd;
 }
 
-int socket_connect_server(int *socket, char server_ip[], int server_port) {
+int socket_connect_server(int *socket, const char server_ip[], const int server_port) {
   struct sockaddr_in server_addr;
   server_addr.sin_family = AF_INET;
   server_addr.sin_port = htons(server_port);
   inet_aton(server_ip, &server_addr.sin_addr);
-  int ret =
-    connect(*socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
+  int ret = connect(*socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
   PERRNO(ret, DB_FLG, "Error: connect");
   return 0;
 }

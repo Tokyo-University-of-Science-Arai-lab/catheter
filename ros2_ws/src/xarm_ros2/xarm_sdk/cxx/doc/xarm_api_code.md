@@ -13,27 +13,27 @@
 
 ## API Code
 - -12: run blockly app exception
-- -11: convert blockly app to pythen exception
+- -11: convert blockly app to python exception
+- -10: servo does not exist
 - -9: emergency stop
 - -8: out of range
 - -7: joint angle limit
-- -6: cartesian pos limit
-- -5: revesed, no use
-- -4: command is not exist
-- -3: reversed, no use
-- -2: xArm is not ready, may be the motion is not enable or not set state
-- -1: xArm is disconnect or not connect
+- -6: cartesian position limit
+- -4: command does not exist
+- -3: API exception
+- -2: xArm is not ready
+- -1: xArm is disconnected or not connected
 - 0: success
-- 1: there are errors that have not been cleared
-- 2: there are warnings that have not been cleared
-- 3: get response timeout
-- 4: tcp reply length error
-- 5: tcp reply number error
-- 6: tcp protocol flag error
-- 7: tcp reply command and send command do not match
-- 8: send command error, may be network exception
+- 1: controller has uncleared errors
+- 2: controller has uncleared warnings
+- 3: response timeout
+- 4: response length error
+- 5: command number mismatch
+- 6: protocol flag error
+- 7: function mismatch
+- 8: tcp channel unavailable
 - 9: state is not ready to move
-- 10: the result is invalid
+- 10: invalid return data
 - 11: other error
 - 12: parameter error
 - 20: host id error
@@ -44,20 +44,21 @@
 - 32: trajectory read/write timeout
 - 33: playback trajectory timeout
 - 34: playback trajectory failed
-- 41: wait to set suction cup timeout
-- 80: linear motor has error
-- 81: linear motor sci is low
-- 82: linear motor is not init
+- 41: suction cup timeout
+- 51: mode is not correct
+- 80: linear motor has fault
+- 81: linear motor SCI is low
+- 82: linear motor is not initialized
 - 100: wait finish timeout
-- 101: too many consecutive failed tests
-- 102: end effector has error
+- 101: check failed
+- 102: end effector has fault
 - 103: end effector is not enabled
 - 129: (standard modbus tcp)illegal/unsupported function code
 - 130: (standard modbus tcp)illegal target address
 - 131: (standard modbus tcp)exception of requested data
 
 ## Controller Warn Code
-- 11: uxbux que is full
+- 11: uxbus queue is full
 - 12: parameter error
 - 13: the instruction does not exist
 - 14: command has no solution
@@ -168,7 +169,7 @@
 - 35: Linear Motor type error
 - 36: Linear Motor Driver Type Error
 - 39: Linear Motor over voltage
-- 40: Linear Moter undervoltage
+- 40: Linear Motor undervoltage
 - 49: Linear Motor EEPROM Read and Write Error
   
 ## Six-axis Force Torque Sensor Error Code
@@ -177,7 +178,7 @@
 - 65: The Data Collected by the Six-axis Force Torque Sensor is Abnormal
 - 66: Six-axis Force Torque Sensor X-direction Torque Exceeds Limit
 - 67: Six-axis Force Torque Sensor Y-direction Torque Exceeds Limit
-- 68: Six-axis Force Torque Sensor Z-direction Torque Exceeds Limitrection
+- 68: Six-axis Force Torque Sensor Z-direction Torque Exceeds Limit
 - 69: Six-axis Force Torque Sensor Tx Torque Exceeds Limit
 - 70: Six-axis Force Torque Sensor Ty direction Torque Exceeds Limit
 - 71: Six-axis Force Torque Sensor Tz direction Torque Exceeds Limit

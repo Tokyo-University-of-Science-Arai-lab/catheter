@@ -18,7 +18,7 @@ int main(int argc, char **argv) {
   }
   std::string port(argv[1]);
 
-  XArmAPI *arm = new XArmAPI(port);
+  auto arm = std::make_shared<XArmAPI>(port);
   sleep_milliseconds(500);
   if (arm->error_code != 0) arm->clean_error();
   if (arm->warn_code != 0) arm->clean_warn();
@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
   // Attention: for M, smaller value means less effort to drive the arm, but may also be less stable, please be careful. 
   // x/y/z equivalent mass; range: 0.02 ~ 1 kg
   // Rx/Ry/Rz equivalent moment of inertia, range: 1e-4 ~ 0.01 (Kg*m^2)
-  float M[6] = { 0.06, 0.06, 0.06, 0.0006, 0.0006, 0.0006 }; // M => {x, y, z, Rx, Ry, Rz} 
+  float M[6] = { 0.06f, 0.06f, 0.06f, 0.0006f, 0.0006f, 0.0006f }; // M => {x, y, z, Rx, Ry, Rz} 
   // x/y/z linear stiffness coefficient, range: 0 ~ 2000 (N/m)
   // Rx/Ry/Rz rotational stiffness coefficient, range: 0 ~ 20 (Nm/rad)
   float K[6] = { 300, 300, 300, 4, 4, 4 }; // K => {x, y, z, Rx, Ry, Rz}

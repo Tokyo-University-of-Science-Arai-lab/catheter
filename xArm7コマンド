@@ -110,9 +110,23 @@ source ros2_ws/install/setup.bash
 ################
 #新しい方のpcへの接続
 ssh book@192.168.1.44
+nano ~/.bashrc
 
-cd ~/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCRFLAGS_allocator_strategy=naive python -m detection.pro_handbook.sam_py_demo.offline_pointcloud_debug
+cd ~/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR
 source .paadle_ocr/bin/activate
 
+FLAGS_allocator_strategy=naive python -m detection.pro_handbook.sam_py_demo.offline_pointcloud_debug
+
+
 python -m detection.pro_handbook.sam_py_demo.offline_pointcloud_debug
+
+
+###シミュレーションの表示？
+cd pro_book/pro_hand_book_python/ros2_ws
+source install/setup.bash
+cd pro_book/pro_hand_book_python/
+ros2 launch xarm_description xarm7_rviz_display.launch.py
+
+
+
 

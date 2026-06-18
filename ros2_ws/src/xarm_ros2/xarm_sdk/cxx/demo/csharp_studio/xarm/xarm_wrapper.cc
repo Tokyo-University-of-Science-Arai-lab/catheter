@@ -14,7 +14,7 @@
 
 namespace XArmWrapper
 {
-  XArmAPI* arm = NULL;
+  XArmAPI* arm = nullptr;
   int id = 0;
   int active_instance_id = 0;
   std::map<int, XArmAPI*> xarm_map;
@@ -22,7 +22,7 @@ namespace XArmWrapper
   int __stdcall switch_xarm(int instance_id) {
     std::map<int, XArmAPI*>::iterator iter = xarm_map.find(instance_id);
     if (iter != xarm_map.end()) {
-      if (arm != NULL && arm != iter->second) {
+      if (arm != nullptr && arm != iter->second) {
         bool removed = true;
         for (std::map<int, XArmAPI*>::iterator it = xarm_map.begin(); it != xarm_map.end(); ++it) {
           if (it->second == arm) {
@@ -34,18 +34,18 @@ namespace XArmWrapper
           arm->disconnect();
           delete arm;
         }
-        printf("current active instance_id: %d\n", iter->first);
+        XARM_LOG_INFO("current active instance_id: %d\n", iter->first);
       }
       arm = iter->second;
       active_instance_id = iter->first;
       return 0;
     }
-    fprintf(stderr, "[switch failed], instance %d is not exist, ", instance_id);
+    XARM_LOG_ERROR("[switch failed], instance %d is not exist, ", instance_id);
     if (active_instance_id != 0) {
-      printf("current active instance_id: %d\n", active_instance_id);
+      XARM_LOG_INFO("current active instance_id: %d\n", active_instance_id);
     }
     else {
-      printf("no active instance\n");
+      XARM_LOG_WARN("no active instance\n");
     }
     return -1;
   }
@@ -54,7 +54,7 @@ namespace XArmWrapper
     std::map<int, XArmAPI*>::iterator iter = xarm_map.find(instance_id);
     if (iter != xarm_map.end()) {
       if (iter->second == arm) {
-        printf("You removed the instance you are using, and the instance will be disconnected and destroyed when you successfully switch to another instance\n");
+        XARM_LOG_WARN("You removed the instance you are using, and the instance will be disconnected and destroyed when you successfully switch to another instance\n");
       }
       else {
         arm->disconnect();
@@ -74,7 +74,7 @@ namespace XArmWrapper
         return iter->second;
       }
       else {
-        printf("instance %d is not exist, use default instance\n", instance_id);
+        XARM_LOG_WARN("instance %d is not exist, use default instance\n", instance_id);
       }
     }
     return arm;
@@ -310,8 +310,8 @@ namespace XArmWrapper
   int __stdcall get_reduced_mode(int *mode, int instance_id) {
     return get_instance(instance_id)->get_reduced_mode(mode);
   }
-  int __stdcall get_reduced_states(int *on, int *xyz_list, float *tcp_speed, float *joint_speed, float jrange[14], int *fense_is_on, int *collision_rebound_is_on, int instance_id) {
-    return get_instance(instance_id)->get_reduced_states(on, xyz_list, tcp_speed, joint_speed, jrange, fense_is_on, collision_rebound_is_on);
+  int __stdcall get_reduced_states(int *on, int *xyz_list, float *tcp_speed, float *joint_speed, float jrange[14], int *fence_is_on, int *collision_rebound_is_on, int instance_id) {
+    return get_instance(instance_id)->get_reduced_states(on, xyz_list, tcp_speed, joint_speed, jrange, fence_is_on, collision_rebound_is_on);
   }
   int __stdcall set_reduced_tcp_boundary(int boundary[6], int instance_id) {
     return get_instance(instance_id)->set_reduced_tcp_boundary(boundary);
@@ -320,7 +320,7 @@ namespace XArmWrapper
     return get_instance(instance_id)->set_reduced_joint_range(jrange);
   }
   int __stdcall set_fense_mode(bool on, int instance_id) {
-    return get_instance(instance_id)->set_fense_mode(on);
+    return get_instance(instance_id)->set_fence_mode(on);
   }
   int __stdcall set_fence_mode(bool on, int instance_id) {
     return get_instance(instance_id)->set_fence_mode(on);
@@ -334,16 +334,16 @@ namespace XArmWrapper
   int __stdcall start_record_trajectory(int instance_id) {
     return get_instance(instance_id)->start_record_trajectory();
   }
-  int __stdcall stop_record_trajectory(char* filename, int instance_id) {
+  int __stdcall stop_record_trajectory(const char* filename, int instance_id) {
     return get_instance(instance_id)->stop_record_trajectory(filename);
   }
-  int __stdcall save_record_trajectory(char* filename, float timeout, int instance_id) {
+  int __stdcall save_record_trajectory(const char* filename, float timeout, int instance_id) {
     return get_instance(instance_id)->save_record_trajectory(filename, timeout);
   }
-  int __stdcall load_trajectory(char* filename, float timeout, int instance_id) {
+  int __stdcall load_trajectory(const char* filename, float timeout, int instance_id) {
     return get_instance(instance_id)->load_trajectory(filename, timeout);
   }
-  int __stdcall playback_trajectory(int times, char* filename, bool wait, int double_speed, int instance_id) {
+  int __stdcall playback_trajectory(int times, const char* filename, bool wait, int double_speed, int instance_id) {
     return get_instance(instance_id)->playback_trajectory(times, filename, wait, double_speed);
   }
   int __stdcall get_trajectory_rw_status(int *status, int instance_id) {
@@ -365,8 +365,8 @@ namespace XArmWrapper
     return get_instance(instance_id)->set_cgpio_analog_with_xyz(ionum, value, xyz, tol_r);
   }
 
-  int __stdcall get_inverse_kinematics(fp32 pose[6], fp32 angles[7], int instance_id) {
-    return get_instance(instance_id)->get_inverse_kinematics(pose, angles);
+  int __stdcall get_inverse_kinematics(fp32 pose[6], fp32 angles[7], bool limited, fp32 ref_angles[7], int instance_id) {
+    return get_instance(instance_id)->get_inverse_kinematics(pose, angles, limited, ref_angles);
   }
   int __stdcall get_forward_kinematics(fp32 angles[7], fp32 pose[6], int instance_id) {
     return get_instance(instance_id)->get_forward_kinematics(angles, pose);

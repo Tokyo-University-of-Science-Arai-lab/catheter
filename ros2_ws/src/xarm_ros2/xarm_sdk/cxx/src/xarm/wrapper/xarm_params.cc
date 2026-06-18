@@ -137,14 +137,14 @@ int XArmAPI::get_reduced_mode(int *mode) {
   return core->get_reduced_mode(mode);
 }
 
-int XArmAPI::get_reduced_states(int *on, int *xyz_list, float *tcp_speed, float *joint_speed, float jrange[14], int *fense_is_on, int *collision_rebound_is_on) {
+int XArmAPI::get_reduced_states(int *on, int *xyz_list, float *tcp_speed, float *joint_speed, float jrange[14], int *fence_is_on, int *collision_rebound_is_on) {
   if (!is_connected()) return API_CODE::NOT_CONNECTED;
-  int ret = core->get_reduced_states(on, xyz_list, tcp_speed, joint_speed, jrange, fense_is_on, collision_rebound_is_on, _version_is_ge() ? 79 : 21);
+  int ret = core->get_reduced_states(on, xyz_list, tcp_speed, joint_speed, jrange, fence_is_on, collision_rebound_is_on, _version_is_ge() ? 79 : 21);
   if (!default_is_radian) {
     *joint_speed = to_degree(*joint_speed);
   }
   if (_version_is_ge()) {
-    if (jrange != NULL && !default_is_radian) {
+    if (jrange != nullptr && !default_is_radian) {
       for (int i = 0; i < 14; i++) {
         jrange[i] = to_degree(jrange[i]);
       }
@@ -185,7 +185,7 @@ int XArmAPI::set_reduced_joint_range(float jrange[14]) {
 
 int XArmAPI::set_fence_mode(bool on) {
   if (!is_connected()) return API_CODE::NOT_CONNECTED;
-  return core->set_fense_on(int(on));
+  return core->set_fence_on(int(on));
 }
 
 int XArmAPI::set_collision_rebound(bool on) {
@@ -244,8 +244,9 @@ int XArmAPI::set_collision_tool_model(int tool_type, int n, ...) {
     return API_CODE::PARAM_ERROR;
   int params_len = tool_type == COLLISION_TOOL_TYPE::BOX ? 6 : tool_type == COLLISION_TOOL_TYPE::CYLINDER ? 5 : 0;
   params_len = params_len < n ? params_len : n;
-  fp32 *params = new fp32[params_len]();
-  memset(params, 0, sizeof(fp32) * params_len);
+  std::vector<fp32> params(params_len, 0);
+  
+  std::fill(params.begin(), params.end(), 0); 
   if (tool_type == COLLISION_TOOL_TYPE::BOX || tool_type == COLLISION_TOOL_TYPE::CYLINDER) {
     va_list args;
     va_start(args, n);
@@ -257,8 +258,7 @@ int XArmAPI::set_collision_tool_model(int tool_type, int n, ...) {
     }
     va_end(args);
   }
-  int ret = core->set_collision_tool_model(tool_type, params_len, params);
-  delete[] params;
+  int ret = core->set_collision_tool_model(tool_type, params_len, params.data());
   return ret;
 }
 
