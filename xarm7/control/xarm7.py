@@ -491,7 +491,7 @@ class XArm7:
 
         right = 1
         left = -1
-        x_offset_mm = -0.0
+        x_offset_mm = -10.0
         k_roll = -4.0
 
         if side == "right":

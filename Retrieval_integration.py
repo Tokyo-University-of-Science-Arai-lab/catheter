@@ -128,12 +128,16 @@ def main_sequence(
         shelf_manager.received = False
         waypoint_node.reset()
         # ==============================
-        # shelf_id 受信待ち
+        # shelf_id 取得（YAML設定優先、なければトピック待ち）
         # ==============================
-        node.get_logger().info("Waiting for /shelf_id ...")
-
-        while rclpy.ok() and not shelf_manager.is_received():
-            executor.spin_once(timeout_sec=0.1)
+        yaml_shelf_id = config.get("shelf_id")
+        if yaml_shelf_id:
+            node.get_logger().info(f"Using shelf_id from config: {yaml_shelf_id}")
+            shelf_manager.set_from_string(str(yaml_shelf_id))
+        else:
+            node.get_logger().info("Waiting for /shelf_id topic ...")
+            while rclpy.ok() and not shelf_manager.is_received():
+                executor.spin_once(timeout_sec=0.1)
 
         side = shelf_manager.get_side()
         height = shelf_manager.get_height()
@@ -189,15 +193,17 @@ def main_sequence(
         wall_watcher = WallDistanceWatcher(node)
 
 
-        node.get_logger().info("Start self-localization loop: wait /navigation_goal pulses until /navigation_goal_final==True")
+        # AMR使用時: /navigation_goal_final トピック受信でウェイポイントが自動起動する
+        # node.get_logger().info("Start self-localization loop: wait /navigation_goal pulses until /navigation_goal_final==True")
+        # node.get_logger().info("Waiting for /navigation_goal_final ...")
 
-        # デバッグ上書き回避したいならサブディレクトリを毎回作るのがおすすめ
-        # 例: bar_dir / time.strftime("%Y%m%d_%H%M%S")
         bar_dir = Path("/home/book/pro_book/pro_hand_book_python/captures/bookshelf_barcode")
         bar_dir.mkdir(parents=True, exist_ok=True)
 
         # init → capture 姿勢へ（Waypoint）
-        node.get_logger().info("Waiting for manual /navigation_goal_final")
+        # AMR不使用のため trigger_goal() で直接起動
+        node.get_logger().info("Triggering waypoint directly (AMR not used)")
+        waypoint_node.trigger_goal()
 
         while rclpy.ok() and not waypoint_node.is_finished():
             executor.spin_once(timeout_sec=0.1)
@@ -499,7 +505,7 @@ def main():
     # メインループ
     # ==============================
     try:
-        for b in books_master:
+        for i, b in enumerate(books_master):
             waypoint_node.reset()
             book_width_offset = sum(retrieved_book_width_list)
 
@@ -514,7 +520,7 @@ def main():
                 arm=arm, #
                 monitor=monitor,
                 executor=executor,
-                waypoint_node=waypoint_node,   
+                waypoint_node=waypoint_node,
                 shelf_manager=waypoint_node.shelf_manager,
             )
 
@@ -525,6 +531,9 @@ def main():
                 break
 
             retrieved_book_width_list.append(retrieved_book_width)
+
+            if i < len(books_master) - 1:
+                input(f"[{i+1}/{len(books_master)}] 初期位置で待機中。次の本へ進むには Enter を押してください: ")
 
     except KeyboardInterrupt:
         node.get_logger().warn("Interrupted by user")

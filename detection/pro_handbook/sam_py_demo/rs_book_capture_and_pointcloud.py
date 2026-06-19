@@ -141,7 +141,7 @@ def capture_one_shot(pipe, cfg, align, shot_dir, *, stem: str, color_only: bool 
 def run_ocr_subprocess(shot_dir: Path):
     # OCR用仮想環境の python へのパス（あなたの環境に合わせて変更）
     # Linux venv例: /home/book/venv/ocr/bin/python
-    OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/bin/python"
+    OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paddle_ocr/bin/python"
     OCR_SCRIPT = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/paddle_ocr_test.py"
 
     subprocess.run([OCR_PY, OCR_SCRIPT, str(shot_dir)], check=True)

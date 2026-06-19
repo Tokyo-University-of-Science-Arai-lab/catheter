@@ -2,6 +2,11 @@ robot:
   xarm:
     host: 192.168.2.221
 
+# 棚ID（トピックパブリッシュ不要）
+# 書式: "棚番号-列番号-段番号-位置番号"  例: "2-5-1-1"
+# 空欄にすると /shelf_id トピック受信待ちに戻る
+shelf_id: "2-5-1-1"
+
 books:
   master_file: master_20260216.json  #master_20260225_tohan.json
 

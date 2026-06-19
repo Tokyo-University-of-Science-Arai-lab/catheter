@@ -259,7 +259,7 @@ def capture_one_shot(pipe, cfg, align, shot_dir, *, stem: str, color_only: bool 
     pipe.stop()
     return color_np, depth_np_u16, intr, depth_scale #後で調べる
 def run_ocr_subprocess(shot_dir: Path):
-    OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/bin/python"
+    OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paddle_ocr/bin/python"
     OCR_SCRIPT = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/paddle_ocr_test.py"
 
     env = os.environ.copy()
@@ -276,7 +276,7 @@ def start_ocr_subprocess(shot_dir: Path):
     OCR を非同期で開始して Popen を返す．
     後で communicate() / wait() して終了を待つ．
     """
-    OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/bin/python"
+    OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paddle_ocr/bin/python"
     OCR_SCRIPT = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/paddle_ocr_test.py"
 
     env = os.environ.copy()
@@ -3222,7 +3222,7 @@ class PersistentOCRWorker:
     """PaddleOCRを常駐プロセス化するための軽量ラッパ．"""
 
     def __init__(self):
-        self.ocr_py = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/bin/python"
+        self.ocr_py = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paddle_ocr/bin/python"
         self.worker_script = ensure_persistent_ocr_worker_script()
         self._req_id = 0
         self._lock = threading.Lock()

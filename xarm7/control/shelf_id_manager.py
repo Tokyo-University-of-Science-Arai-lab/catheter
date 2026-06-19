@@ -204,3 +204,10 @@ class ShelfIDManager:
     
     def get_tcp_z_offset(self):    # TCP微調整
         return self.tcp_z_offset
+
+    def set_from_string(self, data: str):
+        """YAMLなど外部設定から直接 shelf_id を設定する（トピック受信不要）。"""
+        from std_msgs.msg import String
+        msg = String()
+        msg.data = data
+        self.shelf_callback(msg)

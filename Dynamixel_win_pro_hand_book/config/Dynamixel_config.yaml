@@ -7,7 +7,7 @@ id:
 
 pos:
   gripper:
-    close: 3768
+    close: 32
     range: 8190 # 4095*2, open: close + range
     release: 400
     theta_zero: 0.252680 # radian
@@ -15,8 +15,8 @@ pos:
     rad_to_step: 651.8986
     step_to_rad: 0.00153398
     gear_ratio: 20
-    calib_width_a: 0.9284 #0.9685 #0.9343
-    calib_width_b: -8.2664   #-0.3384 #-6.1
+    calib_width_a: 0.936607 #0.9685 #0.9343
+    calib_width_b: -5.585238   #-0.3384 #-6.1
 
   spacer_rot:
     zero: 1473

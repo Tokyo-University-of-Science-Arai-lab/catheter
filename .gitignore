@@ -21,6 +21,7 @@ debug_*.png
 
 # virtual environments
 .pro_hand_book_fixed/
+detection/pro_handbook/sam_py_demo/OCR/.paddle_ocr/
 detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/
 sam3_env/
 .qwen_v1/

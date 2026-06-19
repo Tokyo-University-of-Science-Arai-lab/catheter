@@ -97,9 +97,14 @@ source .pro_hand_book_fixed/bin/activate
 python Retrieval_integration.py
 
 
+###コード変えたのでトピックに流す必要なし
 ros2 topic pub --once /shelf_id std_msgs/String "{data: '2-5-1-1'}"
 ros2 topic pub --once /navigation_goal_final std_msgs/msg/Bool "{data: true}"
 
+###開口幅調整######
+cd /home/book/pro_book/pro_hand_book_python
+python3 -m Dynamixel_win_pro_hand_book.id_1_gripper_pos_check
+python calibrate_gripper.py
 
 python -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
 
@@ -112,6 +117,7 @@ source ros2_ws/install/setup.bash
 ssh book@192.168.1.44
 nano ~/.bashrc
 
+###ocrの方の仮想環境へ入るコマンド####
 cd ~/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR
 source .paadle_ocr/bin/activate
 

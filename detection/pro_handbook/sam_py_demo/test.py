@@ -200,7 +200,7 @@ def load_camera_params(
 # OCR
 # =========================================
 def run_ocr_subprocess(shot_dir: Path):
-    OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/bin/python"
+    OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paddle_ocr/bin/python"
     OCR_SCRIPT = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/paddle_ocr_test.py"
 
     subprocess.run([OCR_PY, OCR_SCRIPT, str(shot_dir)], check=True)
