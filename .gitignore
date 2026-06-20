@@ -159,3 +159,6 @@ __pycache__/
 
 cuda_12.2.0_535.54.03_linux.run
 cuda_12.2.0_535.54.03_linux.run.1
+
+# hand-eye calibration data
+xarm7/handeye_pairs/
