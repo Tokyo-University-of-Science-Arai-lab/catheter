@@ -34,12 +34,12 @@ POSITION_THRESHOLD = cfg.thresh.pos
 
 
 def init_dynamixels():
-    
+
     dxl = Dynamixel(port=PORT, baudrate=BAUDRATE)
     dxl.set_mode_ex_position(GRIPPER_ID)
     print(f'Gripper Position : {dxl.read_position(GRIPPER_ID)}')
     time.sleep(0.2)
-    
+
     print("---------------------------------")
     print("   Dynamixel READY TO MOVE  ")
     print("---------------------------------")
@@ -59,39 +59,38 @@ def open_servo_key(dxl):
             ch = kb.getch()
             if ch == 'K': # L arrow : grippen open
                 curr_des_pos += GRIPPER_ROT_GAIN
-                
+
             elif ch == 'M': # R arrow : gripper close
                 curr_des_pos -=  GRIPPER_ROT_GAIN
-                
+
             elif ch in ('g', 'G'):  # g/G key : break and goto next sequence
                 break
-            
+
         curr_des_pos = max(GRIPPER_CLOSE, min(curr_des_pos, GRIPPER_FULL_OPEN)) # range limitation
-        
+
         if curr_des_pos != last_sent_pos:
             dxl.write_position(GRIPPER_ID, curr_des_pos)  # set gripper position
-            
+
 def calib_width(w_hat): # 20250825時点
     # TODO この関数を使わなくて良くする（バックラッシ，theta_0，rad_to_step 等の調整）
     # width = w_hat/0.901 - 0.4627
     width = (w_hat - GRIPPER_CALIB_B)/GRIPPER_CALIB_A
     return width
-    
+
 def open_until_width(dxl, width, gravity=False): # width : mm, from close position
-    
+
     width = calib_width(width)
-    
+
     dxl.enable_torque(GRIPPER_ID)
-    d_theta = GRIPPER_GR * math.asin((width + 20)/80 - GRIPPER_THETA_0) # radian  #ここちがうくね？
-    d_step = int(d_theta * GRIPPER_R2S + GRIPPER_BL)
-    curr_pos = dxl.read_position(GRIPPER_ID)
+    d_theta = GRIPPER_GR * (math.asin((width + 20)/80 ) - GRIPPER_THETA_0) # radian  #修正した
+    d_step = int(d_theta * GRIPPER_R2S)
     if gravity == True:
-        des_pos = max(GRIPPER_CLOSE, min((curr_pos + d_step - GRIPPER_BL), GRIPPER_FULL_OPEN)) # 重力かかったときにグリッパ開きすぎないようにバックラッシ分差し引く
+        des_pos = max(GRIPPER_CLOSE, min((GRIPPER_CLOSE + d_step), GRIPPER_FULL_OPEN)) #完全に閉じた位置から動く（はず）．エラー起こりやすいかも
     elif gravity == False:
-        des_pos = max(GRIPPER_CLOSE, min((curr_pos + d_step), GRIPPER_FULL_OPEN))
-        
+        des_pos = max(GRIPPER_CLOSE, min((GRIPPER_CLOSE + d_step + GRIPPER_BL), GRIPPER_FULL_OPEN))
+
     dxl.write_position(GRIPPER_ID, des_pos)
-    
+
 
 def grasp(dxl, timeout_sec=3.0):
 
@@ -115,7 +114,7 @@ def grasp(dxl, timeout_sec=3.0):
 
         # ----- 通信エラー検知 -----
         try:
-            curr_vel = dxl.read_velocity(GRIPPER_ID)
+            curr_vel = dxl.read_velocity(GRIPPER_ID) #速度
             curr_pos = dxl.read_position(GRIPPER_ID)
         except Exception as e:
             raise RuntimeError(f"Dynamixel read failed: {e}")
@@ -169,7 +168,7 @@ def open_until_full(dxl, asynchronous=False):
 
 if __name__ == '__main__':
 # test
-    try:        
+    try:
         dxl = init_dynamixels()
         # test
         open_until_width(dxl, 20.0)
@@ -178,9 +177,9 @@ if __name__ == '__main__':
         time.sleep(3.0)
         dxl.disable_torque(GRIPPER_ID)
         dxl.close_port()
-        
+
     except KeyboardInterrupt:
-        
+
         dxl.disable_torque(GRIPPER_ID)
         dxl.close_port()
 
