@@ -31,12 +31,6 @@
 # import numpy as np
 # from PIL import Image
 # import onnxruntime as ort
-
-# try:
-#     ort.preload_dlls(cuda=True, cudnn=True, msvc=False)
-#     print("[ORT][storage] preload_dlls OK", flush=True)
-# except Exception as e:
-#     print(f"[ORT][storage] preload_dlls skipped/failed: {e}", flush=True)
 # import cv2
 # from pathlib import Path as _Path
 # from .modules.crop_pyramid import gen_square_crops, offset_full_mask, bbox_add_offset
@@ -728,13 +722,6 @@ import argparse
 import numpy as np
 from PIL import Image
 import onnxruntime as ort
-
-try:
-    ort.preload_dlls(cuda=True, cudnn=True, msvc=False)
-    print("[ORT][storage] preload_dlls OK", flush=True)
-except Exception as e:
-    print(f"[ORT][storage] preload_dlls skipped/failed: {e}", flush=True)
-
 import cv2
 from pathlib import Path as _Path
 from .modules.crop_pyramid import gen_square_crops, offset_full_mask, bbox_add_offset
@@ -901,11 +888,8 @@ class SamBatchInfer_storage:
     def __init__(self, cfg: SamConfig):
         self.cfg = cfg
         providers = build_providers(cfg.device)
-        print(f"[ORT][storage] requested providers: {providers}", flush=True)
         self.encoder_sess = ort.InferenceSession(cfg.encoder_path, providers=providers)
         self.decoder_sess = ort.InferenceSession(cfg.decoder_path, providers=providers)
-        print(f"[ORT][storage] encoder actual providers: {self.encoder_sess.get_providers()}", flush=True)
-        print(f"[ORT][storage] decoder actual providers: {self.decoder_sess.get_providers()}", flush=True)
         self.enc_input = self.encoder_sess.get_inputs()[0]
 
         # decoder output names are constant; do not rebuild this list for every grid point.

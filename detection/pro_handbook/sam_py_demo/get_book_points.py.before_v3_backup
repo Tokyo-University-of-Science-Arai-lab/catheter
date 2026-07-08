@@ -7409,42 +7409,28 @@ def _get_residual_policy_mode() -> str:
     mode = mode.replace("-", "_")
     if mode in {"", "BASELINE", "NONE", "OFF", "0"}:
         return "baseline"
-    if mode in {
-        "A",
-        "B",
-        "AB",
-        "AB_SAFE",
-        "ABSAFE",
-        "AB_SAFE_A_TUNED",
-        "AB_SAFE_TUNED",
-        "AB_SAFE_A_TUNED_V2",
-        "AB_SAFE_TUNED_V2",
-        "AB_SAFE_A_TUNED_V3",
-        "AB_SAFE_TUNED_V3",
-    }:
+    if mode in {"A", "B", "AB", "AB_SAFE", "ABSAFE", "AB_SAFE_A_TUNED", "AB_SAFE_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_TUNED_V2"}:
         if mode == "ABSAFE":
             return "AB_SAFE"
         if mode == "AB_SAFE_TUNED":
             return "AB_SAFE_A_TUNED"
         if mode == "AB_SAFE_TUNED_V2":
             return "AB_SAFE_A_TUNED_V2"
-        if mode == "AB_SAFE_TUNED_V3":
-            return "AB_SAFE_A_TUNED_V3"
         return mode
     return "baseline"
 
 
 def _residual_policy_has_a(mode: str) -> bool:
-    return str(mode).upper() in {"A", "AB", "AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"}
+    return str(mode).upper() in {"A", "AB", "AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2"}
 
 
 def _residual_policy_has_b(mode: str) -> bool:
-    return str(mode).upper() in {"B", "AB", "AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"}
+    return str(mode).upper() in {"B", "AB", "AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2"}
 
 
 def _residual_policy_a_variant(mode: str) -> str:
     mode = str(mode).upper()
-    if mode in {"AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"}:
+    if mode == "AB_SAFE_A_TUNED_V2":
         return "a_tuned_v2"
     return "a_tuned" if mode == "AB_SAFE_A_TUNED" else "legacy"
 
@@ -7693,7 +7679,7 @@ def _evaluate_residual_policy_ab_safe_interaction(
     current_width_mm = None if current_width_m is None else float(current_width_m) * 1000.0
     out = {
         "mode": mode,
-        "enabled": mode in {"AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"},
+        "enabled": mode in {"AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2"},
         "A_then_B_overwrite_prevented": False,
         "A_after_width_plausible": False,
         "A_after_width_sensitivity": None,
@@ -7704,7 +7690,7 @@ def _evaluate_residual_policy_ab_safe_interaction(
         "skip_reason": None,
         "plausibility_reject_reasons": [],
     }
-    if mode not in {"AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"}:
+    if mode not in {"AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2"}:
         out["notes"].append("not AB_SAFE mode")
         return _jsonable_for_residual_diagnostics(out)
 
@@ -7811,25 +7797,6 @@ def _evaluate_residual_policy_b_width(
         "policy_B_candidate_kept_by_tuned_v2_guard": False,
         "tuned_v2_keep_reasons": [],
         "tuned_v2_reject_reasons": [],
-        "v3_enabled": False,
-        "v3_based_on": None,
-        "v3_small_width_guard_candidate": False,
-        "v3_small_width_guard_used": False,
-        "v3_small_width_guard_blocked": False,
-        "v3_small_width_guard_block_reason": None,
-        "v3_small_width_guard_block_reasons": [],
-        "v3_small_width_guard_proposal": None,
-        "v3_current_width_mm": None,
-        "v3_robust_width_mm": None,
-        "v3_current_minus_robust_mm": None,
-        "v3_current_over_robust_ratio": None,
-        "v3_p2p98_width_mm": None,
-        "v3_p10p90_width_mm": None,
-        "v3_p2p98_minus_p10p90_mm": None,
-        "v3_p2p98_over_p10p90_ratio": None,
-        "v3_largest_component_ratio": None,
-        "v3_keep_ratio": None,
-        "v3_valid_keep_ratio": None,
     }
     if not enabled:
         return out, current_width_m
@@ -7922,7 +7889,7 @@ def _evaluate_residual_policy_b_width(
     tuned_v2_keep_reasons = []
     tuned_v2_reject_reasons = []
     tuned_v2_kept = False
-    if mode in {"AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"} and reject_reasons and robust_width_mm is not None:
+    if mode == "AB_SAFE_A_TUNED_V2" and reject_reasons and robust_width_mm is not None:
         a_triggered = bool((residual_policy_interaction or {}).get("A_triggered", False))
         robust_delta = None if current_width_mm is None else float(current_width_mm - robust_width_mm)
         if a_triggered:
@@ -7980,62 +7947,6 @@ def _evaluate_residual_policy_b_width(
             tuned_v2_kept = True
             reject_reasons = []
 
-    v3_block_reasons = []
-    v3_blocked = False
-    v3_enabled = mode == "AB_SAFE_A_TUNED_V3"
-    if v3_enabled:
-        out["v3_enabled"] = True
-        out["v3_based_on"] = "AB_SAFE_A_TUNED_V2"
-        out["v3_small_width_guard_proposal"] = "Proposal_C_block_non_improving_validation_band"
-        out["v3_small_width_guard_candidate"] = bool(tuned_v2_kept)
-        out["v3_current_width_mm"] = current_width_mm
-        out["v3_robust_width_mm"] = robust_width_mm
-        out["v3_current_minus_robust_mm"] = None if current_width_mm is None or robust_width_mm is None else float(current_width_mm - robust_width_mm)
-        out["v3_current_over_robust_ratio"] = None if current_width_mm is None or robust_width_mm in (None, 0) else float(current_width_mm / robust_width_mm)
-        out["v3_p2p98_width_mm"] = p2
-        out["v3_p10p90_width_mm"] = p10
-        out["v3_p2p98_minus_p10p90_mm"] = None if p2 is None or p10 is None else float(p2 - p10)
-        out["v3_p2p98_over_p10p90_ratio"] = None if p2 is None or p10 in (None, 0) else float(p2 / p10)
-        out["v3_largest_component_ratio"] = largest_ratio
-        out["v3_keep_ratio"] = None
-        out["v3_valid_keep_ratio"] = None
-
-        if tuned_v2_kept:
-            ratio = out["v3_p2p98_over_p10p90_ratio"]
-            # Proposal C from the V2 small-width guard audit:
-            # block over-shrink-prone bands without using case id, book name, or GT.
-            if current_width_mm is not None and robust_width_mm is not None:
-                if current_width_mm < 13.0 and robust_width_mm < 10.55:
-                    v3_block_reasons.append(
-                        f"proposal_c_low_current_low_robust=current={current_width_mm:.3f}mm robust={robust_width_mm:.3f}mm"
-                    )
-            else:
-                v3_block_reasons.append("proposal_c_current_or_robust_width_unavailable")
-
-            if current_width_mm is not None and ratio is not None:
-                if 13.10 <= current_width_mm <= 13.25 and ratio < 1.21:
-                    v3_block_reasons.append(
-                        f"proposal_c_mid_current_low_ratio=current={current_width_mm:.3f}mm ratio={ratio:.3f}"
-                    )
-                if current_width_mm >= 13.4 and ratio > 1.232:
-                    v3_block_reasons.append(
-                        f"proposal_c_high_current_high_ratio=current={current_width_mm:.3f}mm ratio={ratio:.3f}"
-                    )
-            elif current_width_mm is None or ratio is None:
-                v3_block_reasons.append("proposal_c_current_or_ratio_unavailable")
-
-            if v3_block_reasons:
-                v3_blocked = True
-                tuned_v2_kept = False
-                reject_reasons = list(tuned_v2_reject_reasons) + v3_block_reasons
-                if not reject_reasons:
-                    reject_reasons = v3_block_reasons
-
-        out["v3_small_width_guard_blocked"] = bool(v3_blocked)
-        out["v3_small_width_guard_block_reasons"] = v3_block_reasons
-        out["v3_small_width_guard_block_reason"] = "; ".join(v3_block_reasons) if v3_block_reasons else None
-        out["v3_small_width_guard_used"] = bool(tuned_v2_kept)
-
     out["robust_width_candidate"] = robust_candidate_name
     out["selected_robust_width_mm"] = robust_width_mm
     out["policy_B_candidate_kept_by_tuned_v2_guard"] = bool(tuned_v2_kept)
@@ -8047,9 +7958,6 @@ def _evaluate_residual_policy_b_width(
         out["robust_width_adopted"] = True
         out["triggered"] = True
         out["reason"] = (
-            "robust width adopted by AB_SAFE_A_TUNED_V3 small-width stability guard"
-            if v3_enabled and tuned_v2_kept
-            else
             "robust width adopted by AB_SAFE_A_TUNED_V2 small-width stability guard"
             if tuned_v2_kept
             else "robust width adopted in residual policy experiment mode"
@@ -8313,7 +8221,7 @@ def _run_recognition_core_like_offline(
     }
     residual_policy_interaction_info = {
         "mode": residual_policy_mode,
-        "enabled": residual_policy_mode in {"AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"},
+        "enabled": residual_policy_mode in {"AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2"},
         "A_then_B_overwrite_prevented": False,
         "A_after_width_plausible": False,
         "A_after_width_sensitivity": None,
