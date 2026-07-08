@@ -299,8 +299,10 @@ def main_sequence(
             "insertz_before"
         )   #書籍背表紙位置まで挿入                                    #書籍背表紙位置まで移動  
 
-        HandBook_retrieval.open_until_width(HandMotors_retrieval, book_width, gravity=False)
-
+        HandBook_retrieval.close_to_home(HandMotors_retrieval)  # GRIPPER_CLOSEまで閉じてから開く
+        print(f"[DEBUG] open_until_width: target={book_width - 14.0:.1f} mm")
+        HandBook_retrieval.open_until_width(HandMotors_retrieval, book_width - 1.0, gravity=False)
+        time.sleep(2.0)  # グリッパーが開き終わるまで待機
         try:
             #============================認識後の取り出し動作========================================================
 
@@ -317,7 +319,16 @@ def main_sequence(
                 safe_motion(lambda: arm.moveL_post_grasp_left() , monitor, "retreave_left")   #書籍を引き抜く
                 #arm.move_tcp_execute(dx=0.2675, executor=executor)
 
-            tp.publish_target_mm(config["linear_lift"]["move_to_container"])
+            # 書籍を解放 → ハンドリセット → 初期姿勢へ → 次の書籍へ
+            HandBook_retrieval.open_until_full(HandMotors_retrieval)           # ハンドを開く（書籍解放）
+            time.sleep(1.5)                                                    # 開き終わるまで待機
+            HandBook_retrieval.close_to_home(HandMotors_retrieval)             # 完全に閉じる（次書籍に備えてリセット）
+            tp.publish_target_mm(config["linear_lift"]["home_mm"])
+            waypoint_node.reset()
+            waypoint_node.play_direct(config["paths"]["waypoint"]["capture_to_init"][side])
+            while rclpy.ok() and not waypoint_node.is_finished():
+                executor.spin_once(timeout_sec=0.1)
+            return 0.0  # 次の書籍へ
 
             #==========================書籍バーコード認識============================================================
 

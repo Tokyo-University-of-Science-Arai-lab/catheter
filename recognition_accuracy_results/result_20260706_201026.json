@@ -1,0 +1,79 @@
+{
+  "accuracy_pct": 100.0,
+  "n_success": 9,
+  "total": 9,
+  "results": [
+    {
+      "index": 1,
+      "book_name": "Target XL®",
+      "isbn": "9784627846913",
+      "success": true,
+      "book_width_mm": 24.933826532502387,
+      "shot_dir": "captures/20260706_200817"
+    },
+    {
+      "index": 2,
+      "book_name": "TransForm",
+      "isbn": "9784297118846",
+      "success": true,
+      "book_width_mm": 10.328194121199399,
+      "shot_dir": "captures/20260706_200832"
+    },
+    {
+      "index": 3,
+      "book_name": "Synchro SELECT",
+      "isbn": "9784254209457",
+      "success": true,
+      "book_width_mm": 19.46413516998291,
+      "shot_dir": "captures/20260706_200847"
+    },
+    {
+      "index": 4,
+      "book_name": "Eccelsior® XT-27",
+      "isbn": "9784489020360",
+      "success": true,
+      "book_width_mm": 16.509059816598892,
+      "shot_dir": "captures/20260706_200901"
+    },
+    {
+      "index": 5,
+      "book_name": "Surpass Evolve",
+      "isbn": "9784130628051",
+      "success": true,
+      "book_width_mm": 19.162741713127133,
+      "shot_dir": "captures/20260706_200914"
+    },
+    {
+      "index": 6,
+      "book_name": "AXS Vecta® 46",
+      "isbn": "9784798068299",
+      "success": true,
+      "book_width_mm": 22.960960865020752,
+      "shot_dir": "captures/20260706_200930"
+    },
+    {
+      "index": 7,
+      "book_name": "Medtronic Phenom 21 Catheter 160cm",
+      "isbn": "9784781908137",
+      "success": true,
+      "book_width_mm": 17.74672046303749,
+      "shot_dir": "captures/20260706_200945"
+    },
+    {
+      "index": 8,
+      "book_name": "Medtronic Riptide Large Bore Aspiration Tubing REF MAT-110-110 112(284cm)",
+      "isbn": "9784789016278",
+      "success": true,
+      "book_width_mm": 15.456467866897583,
+      "shot_dir": "captures/20260706_200958"
+    },
+    {
+      "index": 9,
+      "book_name": "stryker UPN: M00345100950",
+      "isbn": "9784065218846",
+      "success": true,
+      "book_width_mm": 44.562842696905136,
+      "shot_dir": "captures/20260706_201012"
+    }
+  ]
+}

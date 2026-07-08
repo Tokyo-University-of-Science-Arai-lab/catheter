@@ -17,6 +17,9 @@ models/
 *.deb
 *.run
 
+#hand-eye calibration data
+xarm7/handeye_pairs/
+
 debug_*.png
 
 # virtual environments

@@ -1,0 +1,87 @@
+{
+  "accuracy_pct": 60.0,
+  "n_success": 6,
+  "total": 10,
+  "results": [
+    {
+      "index": 1,
+      "book_name": "Target XL®",
+      "isbn": "9784627846913",
+      "success": false,
+      "book_width_mm": null,
+      "shot_dir": null
+    },
+    {
+      "index": 2,
+      "book_name": "TransForm",
+      "isbn": "9784297118846",
+      "success": true,
+      "book_width_mm": 68.2918030985454,
+      "shot_dir": "captures/20260707_125651"
+    },
+    {
+      "index": 3,
+      "book_name": "Synchro SELECT",
+      "isbn": "9784254209457",
+      "success": false,
+      "book_width_mm": null,
+      "shot_dir": null
+    },
+    {
+      "index": 4,
+      "book_name": "Eccelsior® XT-27",
+      "isbn": "9784489020360",
+      "success": true,
+      "book_width_mm": 15.58853592723608,
+      "shot_dir": "captures/20260707_125716"
+    },
+    {
+      "index": 5,
+      "book_name": "Surpass Evolve",
+      "isbn": "9784130628051",
+      "success": true,
+      "book_width_mm": 19.23471992185973,
+      "shot_dir": "captures/20260707_125728"
+    },
+    {
+      "index": 6,
+      "book_name": "AXS Vecta® 46",
+      "isbn": "9784798068299",
+      "success": true,
+      "book_width_mm": 20.164406985579202,
+      "shot_dir": "captures/20260707_125741"
+    },
+    {
+      "index": 7,
+      "book_name": "pNOVUS 17 Microcatheter 150cm",
+      "isbn": "9784798068299",
+      "success": true,
+      "book_width_mm": 22.430844604969025,
+      "shot_dir": "captures/20260707_125753"
+    },
+    {
+      "index": 8,
+      "book_name": "Medtronic Phenom 21 Catheter 160cm",
+      "isbn": "9784781908137",
+      "success": false,
+      "book_width_mm": null,
+      "shot_dir": null
+    },
+    {
+      "index": 9,
+      "book_name": "Medtronic Riptide Large Bore Aspiration Tubing REF MAT-110-110 112(284cm)",
+      "isbn": "9784789016278",
+      "success": false,
+      "book_width_mm": null,
+      "shot_dir": null
+    },
+    {
+      "index": 10,
+      "book_name": "stryker UPN: M00345100950",
+      "isbn": "9784065218846",
+      "success": true,
+      "book_width_mm": 42.96781122684479,
+      "shot_dir": "captures/20260707_125829"
+    }
+  ]
+}

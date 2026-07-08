@@ -104,6 +104,9 @@ ros2 topic pub --once /navigation_goal_final std_msgs/msg/Bool "{data: true}"
 ###開口幅調整######
 cd /home/book/pro_book/pro_hand_book_python
 python3 -m Dynamixel_win_pro_hand_book.id_1_gripper_pos_check
+python -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
+
+
 python calibrate_gripper.py
 
 python -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
@@ -113,7 +116,7 @@ source ros2_ws/install/setup.bash
 
 
 ################
-#新しい方のpcへの接続
+#新しい方python -m Dynamixel_win_pro_hand_book.HandBook_Retrievalのpcへの接続
 ssh book@192.168.1.44
 nano ~/.bashrc
 

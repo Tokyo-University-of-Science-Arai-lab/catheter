@@ -180,7 +180,7 @@ J_VEL_1 = 1.0
 J_ACC_1 = 2.0
 
 # defined position for retrieval
-SECOND_POSE_DX = 177.5
+SECOND_POSE_DX = 327.5
 #SECOND_POSE_DX = 227.5
 INSERT_DX = 90.0
 RETRIEVAL_DX = SECOND_POSE_DX + INSERT_DX 
@@ -491,22 +491,24 @@ class XArm7:
 
         right = 1
         left = -1
-        x_offset_mm = -10.0
+        x_offset_mm = 0
+        x_fixed_offset_mm = -20.0  # 奥行き方向固定オフセット [mm]（+X方向が正、マイナスで手前）
+        y_fixed_offset_mm =   0.0  # 左右方向の固定オフセット [mm]（+Y方向が正）
         k_roll = -4.0
 
         if side == "right":
             x_offset_mm *= right
-            y_offset_mm = k_roll*right*np.sin(d_roll_rad)
+            y_offset_mm = k_roll*right*np.sin(d_roll_rad) + y_fixed_offset_mm
         elif side == "left":
             x_offset_mm *= left
-            y_offset_mm = k_roll*left*np.sin(d_roll_rad)
+            y_offset_mm = k_roll*left*np.sin(d_roll_rad) + y_fixed_offset_mm
         else:
             raise ValueError("side must be 'right' or 'left'")
 
         curr = self.get_tcp_pose(is_radian=True)
 
         target_pose = [
-            float(p_robot_mm[0] + x_offset_mm),
+            float(p_robot_mm[0] + x_offset_mm + x_fixed_offset_mm),
             float(p_robot_mm[1] + y_offset_mm),
             float(p_robot_mm[2]),
             float(curr[3] + d_roll_rad),

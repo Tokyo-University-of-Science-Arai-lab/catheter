@@ -77,6 +77,22 @@ def calib_width(w_hat): # 20250825時点
     width = (w_hat - GRIPPER_CALIB_B)/GRIPPER_CALIB_A
     return width
 
+def close_to_home(dxl, timeout_sec=3.0):
+    """open_until_width前にGRIPPER_CLOSEまで閉じて位置を保持する"""
+    dxl.enable_torque(GRIPPER_ID)
+    dxl.write_position(GRIPPER_ID, GRIPPER_CLOSE)
+    time.sleep(0.1)
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        curr_pos = dxl.read_position(GRIPPER_ID)
+        if abs(curr_pos - GRIPPER_CLOSE) < POSITION_THRESHOLD:
+            break
+        time.sleep(0.02)
+    curr_pos = dxl.read_position(GRIPPER_ID)
+    print(f"[close_to_home] final pos={curr_pos}, GRIPPER_CLOSE={GRIPPER_CLOSE}, diff={curr_pos - GRIPPER_CLOSE}")
+    # トルクは有効のまま保持（disable_torqueしない）
+
+
 def open_until_width(dxl, width, gravity=False): # width : mm, from close position
 
     width = calib_width(width)

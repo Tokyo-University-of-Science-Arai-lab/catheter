@@ -1,0 +1,88 @@
+{
+  "accuracy_pct": 77.77777777777777,
+  "n_success": 7,
+  "total": 9,
+  "results": [
+    {
+      "index": 1,
+      "book_name": "Target XL®",
+      "isbn": "9784627846913",
+      "success": true,
+      "book_width_mm": 15.456391498446465,
+      "grip_width_mm": 20.456391498446465,
+      "shot_dir": "captures/20260706_193935"
+    },
+    {
+      "index": 2,
+      "book_name": "TransForm",
+      "isbn": "9784297118846",
+      "success": true,
+      "book_width_mm": 14.721462566175768,
+      "grip_width_mm": 19.721462566175767,
+      "shot_dir": "captures/20260706_194006"
+    },
+    {
+      "index": 3,
+      "book_name": "Synchro SELECT",
+      "isbn": "9784254209457",
+      "success": true,
+      "book_width_mm": 15.886173272320097,
+      "grip_width_mm": 20.886173272320097,
+      "shot_dir": "captures/20260706_194047"
+    },
+    {
+      "index": 4,
+      "book_name": "Eccelsior® XT-27",
+      "isbn": "9784489020360",
+      "success": true,
+      "book_width_mm": 17.1494260430336,
+      "grip_width_mm": 22.1494260430336,
+      "shot_dir": "captures/20260706_194103"
+    },
+    {
+      "index": 5,
+      "book_name": "Surpass Evolve",
+      "isbn": "9784130628051",
+      "success": true,
+      "book_width_mm": 16.687556851958334,
+      "grip_width_mm": 21.687556851958334,
+      "shot_dir": "captures/20260706_194117"
+    },
+    {
+      "index": 6,
+      "book_name": "AXS Vecta® 46",
+      "isbn": "9784798068299",
+      "success": true,
+      "book_width_mm": 15.18672280450078,
+      "grip_width_mm": 20.186722804500782,
+      "shot_dir": "captures/20260706_194133"
+    },
+    {
+      "index": 7,
+      "book_name": "Medtronic Phenom 21 Catheter 160cm",
+      "isbn": "9784781908137",
+      "success": true,
+      "book_width_mm": 16.571938675154925,
+      "grip_width_mm": 21.571938675154925,
+      "shot_dir": "captures/20260706_194148"
+    },
+    {
+      "index": 8,
+      "book_name": "Medtronic Riptide Large Bore Aspiration Tubing REF MAT-110-110 112(284cm)",
+      "isbn": "9784789016278",
+      "success": false,
+      "book_width_mm": null,
+      "grip_width_mm": null,
+      "shot_dir": null
+    },
+    {
+      "index": 9,
+      "book_name": "stryker UPN: M00345100950",
+      "isbn": "9784065218846",
+      "success": false,
+      "book_width_mm": null,
+      "grip_width_mm": null,
+      "shot_dir": null
+    }
+  ]
+}

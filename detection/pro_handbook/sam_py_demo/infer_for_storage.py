@@ -394,7 +394,7 @@ class SamBatchInfer_storage:
         tm.stop(); print(f"[TIMER] vertical_filter: {tm.getTimeMilli():.2f} ms")
         tm.reset(); tm.start()
         if stage_save and getattr(stage_save, "save_bookshelves", True):
-            _save_points_and_overlay(img, masks, stage_save.out_dir, f"{stem_for_save}_bookshelves", draw_ids=False)
+            _save_points_and_overlay(img, masks, stage_save.out_dir, f"{stem_for_save}_bookshelves", draw_ids=True)
         tm.stop(); print(f"[TIMER] bookshelves_save: {tm.getTimeMilli():.2f} ms")
         tm.reset(); tm.start()
         # island removal
