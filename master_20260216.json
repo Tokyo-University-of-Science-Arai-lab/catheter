@@ -1,60 +1,140 @@
 [
   {
-    "book_name": "TransForm",
+    "book_name": "ESC0407",
+    "display_name": "TransForm",
+    "LOT": "不明",
+    "expiration date": "2027-10-28",
     "ISBN_number": "9784297118846",
-    "bookshelf_ID": "1-1-1-1"
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.5"
   },
 
   {
-  "book_name": "Target XL®",
+  "book_name": "612104",
+  "display_name": "Target XL",
+  "LOT": "不明",
+  "expiration date": "2030-06-07",
   "ISBN_number": "9784627846913",
-  "bookshelf_ID": "1-1-1-1"
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "17"
   },
 
   {
-  "book_name": "Synchro SELECT",
+  "book_name": "612104",
+  "display_name": "Target XL®",
+  "LOT": "不明",
+  "expiration date": "2030-05-24",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "17"
+  },
+
+  {
+  "book_name": "SSTD215STR",
+  "display_name": "Synchro SELECT",
+  "LOT": "不明",
+  "expiration date": "2028-11-15",
   "ISBN_number": "9784254209457",
-  "bookshelf_ID": "1-1-1-1"
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "18.0"
+  },
+
+    {
+  "book_name": "SSTD215STR",
+  "display_name": "Synchro SELECT",
+  "LOT": "不明",
+  "expiration date": "2028-12-03",
+  "ISBN_number": "9784254209457",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "18.0"
   },
   
+    {
+  "book_name": "SSTD215STR",
+  "display_name": "Synchro SELECT",
+  "LOT": "不明",
+  "expiration date": "2028-12-03",
+  "ISBN_number": "9784254209457",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "18.0"
+  },
+
   {
-    "book_name": "Eccelsior® XT-27",
+    "book_name": "XT275081",
+    "display_name": "Eccelsior® XT-27",
+    "LOT": "不明",
+    "expiration date": "2028-12-03",
     "ISBN_number": "9784489020360",
-    "bookshelf_ID": "1-1-1-1"
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "18"
   },
 
   {
-    "book_name": "Surpass Evolve",
+    "book_name": "FD45017",
+    "display_name": "Surpass Evolve",
+    "LOT": "不明",
+    "expiration date": "2027-02-13",
     "ISBN_number": "9784130628051",
-    "bookshelf_ID": "1-1-1-1"
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "19.0"
   },
 
   {
-    "book_name": "AXS Vecta® 46",
+    "book_name": "INC-11814-125",
+    "display_name": "AXS Vecta® 46 DAC",
+    "LOT": "不明",
+    "expiration date": "2028-06-29",
     "ISBN_number": "9784798068299",
-    "bookshelf_ID": "1-1-1-1"
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "22.8"
+  },
+
+  {
+    "book_name": "INC-11814-146",
+    "display_name": "AXS Vecta® 46",
+    "LOT": "不明",
+    "expiration date": "2028-09-22",
+    "ISBN_number": "9784798068299",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "22.2"
   },
 
 {
-    "book_name": "pNOVUS 17 Microcatheter 150cm",
+    "book_name": "MC1715000",
+    "display_name": "pNOVUS 17 150cm",
+    "LOT": "MCR00341",
+    "expiration date": "2028-11-27",
     "ISBN_number": "9784798068299",
-    "bookshelf_ID": "1-1-1-1"
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "21.0"
   },
 
   {
-    "book_name": "Medtronic Phenom 21 Catheter 160cm",
+    "book_name": "FG13160-0615-1S",
+    "display_name": "Phenom 160cm",
+    "LOT": "232639510",
+    "expiration date": "2028-1105",
     "ISBN_number": "9784781908137",
-    "bookshelf_ID": "1-1-1-1"
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.0"
   },
   {
-    "book_name": "Medtronic Riptide Large Bore Aspiration Tubing REF MAT-110-110 112(284cm)",
+    "book_name": "MAT-110-110",
+    "display_name": "Medtronic Ripride",
+    "LOT": "442733",
+    "expiration date": "2027-10-14",
     "ISBN_number": "9784789016278",
-    "bookshelf_ID": "1-1-1-1"
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.0"
   },
   {
-    "book_name": "stryker UPN: M00345100950",
+    "book_name": "M00345100950",
+    "display_name": "Strykerの厚いオレンジの箱",
+    "LOT": "不明",
+    "expiration date": "2027-09-22",
     "ISBN_number": "9784065218846",
-    "bookshelf_ID": "1-1-1-1"
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "44.2"
   }
 
 ]

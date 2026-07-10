@@ -114,6 +114,12 @@ python -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
 source /opt/ros/humble/setup.bash
 source ros2_ws/install/setup.bash
 
+#認識
+python recognition_accuracy_test.py
+
+#撮影
+python3 capture_burst.py
+
 
 ################
 #新しい方python -m Dynamixel_win_pro_hand_book.HandBook_Retrievalのpcへの接続
