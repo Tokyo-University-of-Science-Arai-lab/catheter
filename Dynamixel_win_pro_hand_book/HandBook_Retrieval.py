@@ -36,6 +36,7 @@ POSITION_THRESHOLD = cfg.thresh.pos
 def init_dynamixels():
 
     dxl = Dynamixel(port=PORT, baudrate=BAUDRATE)
+    dxl.disable_torque(GRIPPER_ID)
     dxl.set_mode_ex_position(GRIPPER_ID)
     print(f'Gripper Position : {dxl.read_position(GRIPPER_ID)}')
     time.sleep(0.2)
@@ -97,8 +98,13 @@ def open_until_width(dxl, width, gravity=False): # width : mm, from close positi
 
     width = calib_width(width)
 
+    # asin の引数を [-1, 1] にクリップ（認識幅が物理限界を超えた場合でもクラッシュしない）
+    asin_arg = max(-1.0, min(1.0, (width + 20) / 80))
+    if abs(asin_arg) == 1.0:
+        print(f"[WARN] open_until_width: width={width:.1f} mm が物理限界を超えています。クリップします。")
+
     dxl.enable_torque(GRIPPER_ID)
-    d_theta = GRIPPER_GR * (math.asin((width + 20)/80 ) - GRIPPER_THETA_0) # radian  #修正した
+    d_theta = GRIPPER_GR * (math.asin(asin_arg) - GRIPPER_THETA_0) # radian  #修正した
     d_step = int(d_theta * GRIPPER_R2S)
     if gravity == True:
         des_pos = max(GRIPPER_CLOSE, min((GRIPPER_CLOSE + d_step), GRIPPER_FULL_OPEN)) #完全に閉じた位置から動く（はず）．エラー起こりやすいかも

@@ -76,6 +76,10 @@ class Dynamixel:
         self._check_write(comm, err, context=f"PING(ID={dxl_id})")
         return model_number
 
+    def reboot(self, dxl_id: int):
+        comm, err = self.__packetHandler.reboot(self.__portHandler, dxl_id)
+        self._check_write(comm, err, context=f"reboot(ID={dxl_id})")
+
     def enable_torque(self, dxl_id: int):
         self._write1(dxl_id, self.__ADDR_TORQUE_ENABLE, self.__TORQUE_ENABLE, "enable_torque")
 

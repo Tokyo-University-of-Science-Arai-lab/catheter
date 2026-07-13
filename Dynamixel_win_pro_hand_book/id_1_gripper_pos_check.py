@@ -8,6 +8,9 @@ try:
     dxl = Dynamixel("/dev/ttyUSB0", 57600) #インスタンス化
     kb = kbhit.KBHit() #キーボード入力のクラス立ち上げ
     time.sleep(0.5)  #通信が確立するまでちょっと待つ（待たなくても良いが高速すぎるとバッファが溢れ命令実行漏れが発生する）
+    dxl.reboot(1)    # ハードウェアエラーをクリア
+    time.sleep(0.5)  # reboot後の起動待ち
+    dxl.disable_torque(1)
     dxl.set_mode_ex_position(1) # 拡張位置制御モードに設定
 
     init_pos  = int(dxl.read_position(1)) #現在の位置を取得し目標値の初期値として代入

@@ -20,10 +20,40 @@
   },
 
   {
+  "book_name": "612104",
+  "display_name": "Target XL®",
+  "LOT": "不明",
+  "expiration date": "2030-05-24",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "17"
+  },
+
+  {
   "book_name": "SSTD215STR",
   "display_name": "Synchro SELECT",
   "LOT": "不明",
   "expiration date": "2028-11-15",
+  "ISBN_number": "9784254209457",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "18.0"
+  },
+
+    {
+  "book_name": "SSTD215STR",
+  "display_name": "Synchro SELECT",
+  "LOT": "不明",
+  "expiration date": "2028-12-03",
+  "ISBN_number": "9784254209457",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "18.0"
+  },
+  
+    {
+  "book_name": "SSTD215STR",
+  "display_name": "Synchro SELECT",
+  "LOT": "不明",
+  "expiration date": "2028-12-03",
   "ISBN_number": "9784254209457",
   "bookshelf_ID": "1-1-1-1",
   "book_width": "18.0"

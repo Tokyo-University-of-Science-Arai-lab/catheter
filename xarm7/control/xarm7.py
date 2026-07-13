@@ -182,7 +182,7 @@ J_ACC_1 = 2.0
 # defined position for retrieval
 SECOND_POSE_DX = 327.5
 #SECOND_POSE_DX = 227.5
-INSERT_DX = 90.0
+INSERT_DX = 150.0
 RETRIEVAL_DX = SECOND_POSE_DX + INSERT_DX 
 PASS_POLL_DY = 500.0
 PASS_POLL_DX = -60.0
@@ -491,7 +491,7 @@ class XArm7:
 
         right = 1
         left = -1
-        x_offset_mm = 0
+        x_offset_mm = -60
         x_fixed_offset_mm = -20.0  # 奥行き方向固定オフセット [mm]（+X方向が正、マイナスで手前）
         y_fixed_offset_mm =   0.0  # 左右方向の固定オフセット [mm]（+Y方向が正）
         k_roll = -4.0

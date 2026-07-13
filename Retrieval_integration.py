@@ -300,8 +300,8 @@ def main_sequence(
         )   #書籍背表紙位置まで挿入                                    #書籍背表紙位置まで移動  
 
         HandBook_retrieval.close_to_home(HandMotors_retrieval)  # GRIPPER_CLOSEまで閉じてから開く
-        print(f"[DEBUG] open_until_width: target={book_width - 14.0:.1f} mm")
-        HandBook_retrieval.open_until_width(HandMotors_retrieval, book_width - 1.0, gravity=False)
+        print(f"[DEBUG] open_until_width: target={book_width - 10.0:.1f} mm")
+        HandBook_retrieval.open_until_width(HandMotors_retrieval, book_width - 10.0, gravity=False)
         time.sleep(2.0)  # グリッパーが開き終わるまで待機
         try:
             #============================認識後の取り出し動作========================================================
@@ -512,11 +512,35 @@ def main():
 
     executor.add_node(waypoint_node)
 
+    def select_book(books):
+        print("\n" + "=" * 50)
+        print("  取り出す書籍を番号で選んでください")
+        print("=" * 50)
+        for idx, b in enumerate(books):
+            print(f"  {idx + 1:2d}. {b.get('display_name', b['book_name'])}")
+        print("   q. 終了")
+        print("=" * 50)
+        while True:
+            raw = input("番号を入力 > ").strip()
+            if raw.lower() == "q":
+                return None
+            if raw.isdigit():
+                n = int(raw)
+                if 1 <= n <= len(books):
+                    return books[n - 1]
+            print(f"  1〜{len(books)} の数字か q を入力してください")
+
     # ==============================
     # メインループ
     # ==============================
     try:
-        for i, b in enumerate(books_master):
+        seq = 0
+        while True:
+            b = select_book(books_master)
+            if b is None:
+                print("終了します")
+                break
+
             waypoint_node.reset()
             book_width_offset = sum(retrieved_book_width_list)
 
@@ -528,7 +552,7 @@ def main():
                 book_width_offset=book_width_offset,
                 tp=tp,
                 node=node,
-                arm=arm, #
+                arm=arm,
                 monitor=monitor,
                 executor=executor,
                 waypoint_node=waypoint_node,
@@ -542,9 +566,7 @@ def main():
                 break
 
             retrieved_book_width_list.append(retrieved_book_width)
-
-            if i < len(books_master) - 1:
-                input(f"[{i+1}/{len(books_master)}] 初期位置で待機中。次の本へ進むには Enter を押してください: ")
+            seq += 1
 
     except KeyboardInterrupt:
         node.get_logger().warn("Interrupted by user")
