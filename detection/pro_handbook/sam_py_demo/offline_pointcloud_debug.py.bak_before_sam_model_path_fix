@@ -1,37 +1,16 @@
-import os
-import sys
-
-# onnxruntime-gpu が cuDNN を見つけられるよう LD_LIBRARY_PATH を設定して再起動
-# （recognition_accuracy_test.py と同じ対処）
-_cudnn_lib = (
-    "/home/book/pro_book/pro_hand_book_python"
-    "/.pro_hand_book_fixed/lib/python3.10/site-packages/nvidia/cudnn/lib"
-)
-if _cudnn_lib not in os.environ.get("LD_LIBRARY_PATH", ""):
-    os.environ["LD_LIBRARY_PATH"] = _cudnn_lib + ":" + os.environ.get("LD_LIBRARY_PATH", "")
-    os.execv(
-        sys.executable,
-        [sys.executable, "-m", "detection.pro_handbook.sam_py_demo.offline_pointcloud_debug"]
-        + sys.argv[1:],
-    )
-
-from .get_book_points_revised import run_capture_and_pca_offline
+from .get_book_points import run_capture_and_pca_offline
 from pathlib import Path
 
 # Project root: .../pro_hand_book_python
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 import json
 import csv
-import os
 import time
 import traceback
 from datetime import datetime
 import shutil
 import sys
 from contextlib import redirect_stdout, redirect_stderr
-
-import cv2
-import numpy as np
 
 
 # =========================
@@ -51,14 +30,7 @@ SAM_DEVICE = "gpu"
 
 START_INDEX = 1
 END_INDEX = 100
-# 1ラウンドで全書籍を1枚ずつ撮影し、それを N_ROUNDS 回繰り返す構成
-# test_index の書籍マッピング:
-#   master_index = (test_index - 1) % N_BOOKS   (書籍が1周するたびにリセット)
-#   round_index  = (test_index - 1) // N_BOOKS + 1
-# 例: N_BOOKS=10 のとき
-#   1〜10  → 書籍0〜9 (ラウンド1)
-#   11〜20 → 書籍0〜9 (ラウンド2)
-N_ROUNDS = 10  # 各書籍を何回繰り返すか（N_BOOKS × N_ROUNDS = END_INDEX）
+REPEATS_PER_BOOK = 5
 
 # 評価しきい値 [mm]
 ERROR_THRESHOLDS_MM = [1.0, 1.5, 2.0]
@@ -68,18 +40,6 @@ ERROR_THRESHOLDS_MM = [1.0, 1.5, 2.0]
 INPUT_FILES = [
     "after_init_rgb.png",
     "after_init_depth.npy",
-]
-
-CONTACT_SHEET_STAGES = [
-    ("05", "05 before column refine"),
-    ("06a", "06a no seed guard"),
-    ("06b", "06b seed guard"),
-    ("07", "07 selected result"),
-    ("08", "08 final_t_width_clip"),
-    ("09", "09 one_sided post-final"),
-    ("11", "11 RANSAC"),
-    ("12", "12 post-RANSAC"),
-    ("final", "final"),
 ]
 
 
@@ -143,15 +103,18 @@ def load_master(master_json: Path):
 
 def get_book_info_for_test_index(master_books, test_index: int):
     """
-    1ラウンドで全書籍を1枚ずつカバーする構成。
-    N_BOOKS=10 のとき:
-      1〜10  -> master[0]〜master[9]  (ラウンド1)
-      11〜20 -> master[0]〜master[9]  (ラウンド2)
-      ...
+    1〜5     -> master[0]
+    6〜10    -> master[1]
+    ...
+    96〜100  -> master[19]
     """
-    n_books = len(master_books)
-    master_index = (test_index - 1) % n_books
-    repeat_index = (test_index - 1) // n_books + 1
+    master_index = (test_index - 1) // REPEATS_PER_BOOK
+    repeat_index = (test_index - 1) % REPEATS_PER_BOOK + 1
+
+    if master_index < 0 or master_index >= len(master_books):
+        raise IndexError(
+            f"test_index={test_index} に対応する master_index={master_index} が存在しません。"
+        )
 
     return master_index, repeat_index, master_books[master_index]
 
@@ -219,217 +182,13 @@ def save_json(path: Path, obj):
         json.dump(obj, f, ensure_ascii=False, indent=2)
 
 
-def parse_case_indices_from_env():
-    raw = os.environ.get("CODEX_CASE_INDICES", "").strip()
-    if not raw:
-        return None
-    out = []
-    for part in raw.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            a, b = part.split("-", 1)
-            out.extend(range(int(a), int(b) + 1))
-        else:
-            out.append(int(part))
-    return sorted(dict.fromkeys(out))
-
-
-def get_codex_result_root():
-    raw = os.environ.get("CODEX_RESULT_ROOT", "").strip()
-    if not raw:
-        return None
-    p = Path(raw)
-    if not p.is_absolute():
-        p = BASE_DIR / p
-    p.mkdir(parents=True, exist_ok=True)
-    for name in ["contact_sheets", "logs", "representative_cases", "top_error_cases", "random_over_2mm_cases"]:
-        (p / name).mkdir(parents=True, exist_ok=True)
-    return p
-
-
-def _find_stage_image(case_dir: Path, stage_id: str):
-    if stage_id == "final":
-        for p in [
-            case_dir / "final.png",
-            *sorted(case_dir.glob("mask*_final_valid_depth_region_overlay.png")),
-            *sorted((case_dir / "debug_final_pointcloud_rgb").glob("*_final_valid_depth_region_overlay.png")),
-            *sorted((case_dir / "debug_final_pointcloud_rgb").glob("*_final_pointcloud_projection_overlay.png")),
-        ]:
-            if p.exists():
-                return p
-        return None
-    debug_dir = case_dir / "debug_step_by_step_pointcloud_rgb"
-    matches = []
-    if debug_dir.exists():
-        matches = sorted(debug_dir.glob(f"*_{stage_id}_*_projection_overlay.png"))
-        if not matches:
-            matches = sorted(debug_dir.glob(f"*_{stage_id}*_projection_overlay.png"))
-    if matches:
-        return matches[0]
-
-    # Some local branches do not emit step-by-step projection images. Fall back to
-    # the closest stage overlays produced by the OCR/column debug code.
-    band_dir = case_dir / "debug_ocr_band"
-    fallback_patterns = {
-        "05": ["*_ocr_band_candidate_overlay_kept_removed.png", "*_spine_column_overlay_kept_removed.png"],
-        "06a": ["*_candidate_no_seed_guard_spine_column_overlay_kept_removed.png"],
-        "06b": ["*_candidate_seed_guard_spine_column_overlay_kept_removed.png"],
-        "07": ["*_spine_column_overlay_kept_removed.png"],
-        "08": ["*_final_t_width_clip_spine_column_overlay_kept_removed.png"],
-        "09": ["*_one_sided_post_final_column_prune_spine_column_overlay_kept_removed.png"],
-        "11": ["../debug_ransac_spine_plane/*_overlay_kept_removed.png"],
-        "12": ["../debug_post_ransac_plane_a95/*_overlay_kept_removed.png"],
-    }
-    for pattern in fallback_patterns.get(stage_id, []):
-        matches = sorted(band_dir.glob(pattern))
-        if matches:
-            return matches[0]
-    if stage_id in {"09", "11", "12"}:
-        return _find_stage_image(case_dir, "final")
-    return matches[0] if matches else None
-
-
-def _valid_pixel_count_for_stage(case_dir: Path, stage_id: str):
-    if stage_id == "final":
-        candidates = [case_dir / "final_mask.png"]
-        candidates.extend(sorted((case_dir / "debug_final_pointcloud_rgb").glob("*_final_valid_depth_region_mask.png")))
-        for p in candidates:
-            if not p.exists():
-                continue
-            img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
-            if img is not None:
-                return int(np.count_nonzero(img))
-        return None
-    debug_dir = case_dir / "debug_step_by_step_pointcloud_rgb"
-    logs = sorted(debug_dir.glob(f"*_{stage_id}_*_log.json")) if debug_dir.exists() else []
-    if not logs and debug_dir.exists():
-        logs = sorted(debug_dir.glob(f"*_{stage_id}*_log.json"))
-    for p in logs:
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            v = data.get("valid_input_pixel_count")
-            if v is None:
-                v = data.get("point_count")
-            return None if v is None else int(v)
-        except Exception:
-            continue
-    band_dir = case_dir / "debug_ocr_band"
-    fallback_logs = {
-        "06a": ["*_candidate_no_seed_guard_spine_column_log.json"],
-        "06b": ["*_candidate_seed_guard_spine_column_log.json"],
-        "07": ["*_spine_column_log.json"],
-        "08": ["*_final_t_width_clip_spine_column_log.json"],
-        "09": ["*_one_sided_post_final_column_prune_spine_column_log.json"],
-    }
-    for pattern in fallback_logs.get(stage_id, []):
-        for p in sorted(band_dir.glob(pattern)):
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                v = data.get("valid_count_after") or data.get("area_after")
-                return None if v is None else int(v)
-            except Exception:
-                continue
-    if stage_id in {"11", "12"}:
-        return _valid_pixel_count_for_stage(case_dir, "final")
-    return None
-
-
-def make_contact_sheet(case_dir: Path, out_path: Path, *, title: str = ""):
-    tiles = []
-    tile_w, tile_h = 420, 300
-    for stage_id, label in CONTACT_SHEET_STAGES:
-        img_path = _find_stage_image(case_dir, stage_id)
-        if img_path is not None:
-            img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
-        else:
-            img = None
-        if img is None:
-            tile = np.full((tile_h, tile_w, 3), 245, dtype=np.uint8)
-            cv2.putText(tile, "missing", (25, 150), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 220), 2, cv2.LINE_AA)
-        else:
-            h, w = img.shape[:2]
-            scale = min(tile_w / max(w, 1), (tile_h - 48) / max(h, 1))
-            nw, nh = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
-            resized = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
-            tile = np.full((tile_h, tile_w, 3), 255, dtype=np.uint8)
-            y0 = 48 + (tile_h - 48 - nh) // 2
-            x0 = (tile_w - nw) // 2
-            tile[y0:y0 + nh, x0:x0 + nw] = resized
-        count = _valid_pixel_count_for_stage(case_dir, stage_id)
-        header = f"{label}"
-        sub = f"valid={count}" if count is not None else "valid=n/a"
-        cv2.rectangle(tile, (0, 0), (tile_w, 46), (30, 30, 30), -1)
-        cv2.putText(tile, header, (10, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
-        cv2.putText(tile, sub, (10, 39), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
-        tiles.append(tile)
-
-    rows = []
-    for i in range(0, len(tiles), 3):
-        row_tiles = tiles[i:i + 3]
-        while len(row_tiles) < 3:
-            row_tiles.append(np.full((tile_h, tile_w, 3), 255, dtype=np.uint8))
-        rows.append(np.hstack(row_tiles))
-    sheet = np.vstack(rows)
-    if title:
-        title_bar = np.full((42, sheet.shape[1], 3), 20, dtype=np.uint8)
-        cv2.putText(title_bar, title, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2, cv2.LINE_AA)
-        sheet = np.vstack([title_bar, sheet])
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(out_path), sheet)
-    return out_path
-
-
-def copy_case_outputs_to_codex(case_dir: Path, codex_result_root: Path, test_index: int, row: dict):
-    if codex_result_root is None:
-        return {}
-    copied = {}
-    case_name = f"case_{test_index:03d}"
-    log_src = case_dir / "offline_run_console.log"
-    if log_src.exists():
-        log_dst = codex_result_root / "logs" / f"case_{test_index:03d}_console.log"
-        shutil.copy2(log_src, log_dst)
-        copied["console_log"] = str(log_dst)
-    sheet_path = codex_result_root / "contact_sheets" / f"case_{test_index:03d}_contact_sheet.png"
-    try:
-        make_contact_sheet(
-            case_dir,
-            sheet_path,
-            title=f"case {test_index:03d} | {row.get('book_name', '')} | status={row.get('status')}",
-        )
-        copied["contact_sheet"] = str(sheet_path)
-    except Exception as e:
-        copied["contact_sheet_error"] = str(e)
-
-    if test_index in {6, 7, 15, 26, 29}:
-        dst_dir = codex_result_root / "representative_cases" / str(test_index)
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        for name in ["case_result.json", "final.png", "final_mask.png", "offline_run_console.log"]:
-            src = case_dir / name
-            if src.exists():
-                shutil.copy2(src, dst_dir / name)
-        if "contact_sheet" in copied:
-            shutil.copy2(copied["contact_sheet"], dst_dir / f"case_{test_index:03d}_contact_sheet.png")
-        copied["representative_case_dir"] = str(dst_dir)
-    return copied
-
-
 def main():
-    case_indices = parse_case_indices_from_env()
-    codex_result_root = get_codex_result_root()
     print("\n===== BOOK WIDTH OFFLINE EVAL START =====")
     print(f"source test dir : {TEST_BASE_DIR}")
     print(f"offline base dir: {OFFLINE_BASE_DIR}")
     print(f"master json     : {MASTER_JSON}")
     print(f"sam_device      : {SAM_DEVICE}")
     print(f"test range      : {START_INDEX} to {END_INDEX}")
-    if case_indices is not None:
-        print(f"case indices    : {case_indices}")
-    if codex_result_root is not None:
-        print(f"codex result root: {codex_result_root}")
     print("=========================================\n")
 
     master_books = load_master(MASTER_JSON)
@@ -451,7 +210,7 @@ def main():
         "sam_device": SAM_DEVICE,
         "start_index": START_INDEX,
         "end_index": END_INDEX,
-        "n_rounds": N_ROUNDS,
+        "repeats_per_book": REPEATS_PER_BOOK,
         "error_thresholds_mm": ERROR_THRESHOLDS_MM,
         "input_files": INPUT_FILES,
         "output_structure": "captures/100test_offline/<timestamp>/<test_index>/",
@@ -462,20 +221,9 @@ def main():
     print(f"設定JSON: {run_config_json}")
 
     results = []
-    indices_to_run = case_indices if case_indices is not None else list(range(START_INDEX, END_INDEX + 1))
-    total_trials = len(indices_to_run)
+    total_trials = END_INDEX - START_INDEX + 1
 
-    case_notes_csv = codex_result_root / "case_notes.csv" if codex_result_root is not None else None
-    if case_notes_csv is not None and not case_notes_csv.exists():
-        with open(case_notes_csv, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.DictWriter(f, fieldnames=[
-                "test_index", "book_name", "gt_width_mm", "pred_width_mm",
-                "abs_error_mm", "status", "collapsed_stage", "visual_note",
-                "contact_sheet_path", "run_shot_dir",
-            ])
-            writer.writeheader()
-
-    for test_index in indices_to_run:
+    for test_index in range(START_INDEX, END_INDEX + 1):
         source_shot_dir = TEST_BASE_DIR / str(test_index)
         run_shot_dir = run_root_dir / str(test_index)
         run_shot_dir.mkdir(parents=True, exist_ok=True)
@@ -535,11 +283,6 @@ def main():
                         query=book_name,
                         shot_dir=run_shot_dir.resolve(),
                         sam_device=SAM_DEVICE,
-                        encoder_path=str(BASE_DIR / "models" / "sam_vit_h_4b8939.encoder.onnx"),
-                        decoder_path=str(BASE_DIR / "models" / "sam_vit_h_4b8939.decoder.onnx"),
-                        interactive=False,
-                        show_pointcloud_gui=False,
-                        save_pointcloud_debug=True,
                     )
 
                     elapsed = time.perf_counter() - start
@@ -624,39 +367,8 @@ def main():
         # 途中で落ちても結果が残るように毎回保存
         save_results(results, out_csv, out_json)
 
-        copied_outputs = {}
-        try:
-            copied_outputs = copy_case_outputs_to_codex(run_shot_dir, codex_result_root, test_index, row)
-        except Exception as e:
-            copied_outputs = {"copy_error": str(e)}
-            traceback.print_exc()
-
-        if case_notes_csv is not None and row is not None:
-            with open(case_notes_csv, "a", newline="", encoding="utf-8-sig") as f:
-                writer = csv.DictWriter(f, fieldnames=[
-                    "test_index", "book_name", "gt_width_mm", "pred_width_mm",
-                    "abs_error_mm", "status", "collapsed_stage", "visual_note",
-                    "contact_sheet_path", "run_shot_dir",
-                ])
-                writer.writerow({
-                    "test_index": row.get("test_index"),
-                    "book_name": row.get("book_name"),
-                    "gt_width_mm": row.get("gt_book_width_mm"),
-                    "pred_width_mm": row.get("pred_book_width_mm"),
-                    "abs_error_mm": row.get("abs_error_mm"),
-                    "status": row.get("status"),
-                    "collapsed_stage": "",
-                    "visual_note": "pending manual visual inspection",
-                    "contact_sheet_path": copied_outputs.get("contact_sheet", ""),
-                    "run_shot_dir": row.get("run_shot_dir"),
-                })
-
     summary = make_summary(results, total_trials)
     save_summary(summary, out_summary)
-    if codex_result_root is not None:
-        shutil.copy2(out_csv, codex_result_root / "eval_results.csv")
-        shutil.copy2(out_summary, codex_result_root / "eval_summary.json")
-        shutil.copy2(run_config_json, codex_result_root / "offline_eval_run_config.json")
 
     print_summary(summary)
 

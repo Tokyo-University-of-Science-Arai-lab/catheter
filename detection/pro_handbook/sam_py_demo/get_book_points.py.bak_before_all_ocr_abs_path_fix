@@ -26,8 +26,6 @@ import subprocess
 import re
 import traceback
 import os
-import sys
-import csv
 from .OCR.only_one import find_similar_books
 from .OCR.only_one_tilted import match_text_to_mask_main
 
@@ -365,30 +363,9 @@ def capture_one_shot(pipe, cfg, align, shot_dir, *, stem: str, color_only: bool 
 
     pipe.stop()
     return color_np, depth_np_u16, intr, depth_scale #後で調べる
-def _resolve_ocr_subprocess_paths():
-    ocr_dir = Path(__file__).resolve().parent / "OCR"
-    ocr_py = ocr_dir / ".paddle_ocr" / "bin" / "python"
-    ocr_script = ocr_dir / "paddle_ocr_test.py"
-    if not ocr_py.exists():
-        ocr_py = Path(sys.executable)
-    else:
-        try:
-            probe = subprocess.run(
-                [str(ocr_py), "-c", "import cv2"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5.0,
-                check=False,
-            )
-            if probe.returncode != 0:
-                ocr_py = Path(sys.executable)
-        except Exception:
-            ocr_py = Path(sys.executable)
-    return str(ocr_py), str(ocr_script)
-
-
 def run_ocr_subprocess(shot_dir: Path):
-    OCR_PY, OCR_SCRIPT = _resolve_ocr_subprocess_paths()
+    OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/bin/python"
+    OCR_SCRIPT = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/paddle_ocr_test.py"
 
     env = os.environ.copy()
     # PaddleOCR側が親プロセスのCUDA/cuBLASを拾って不安定になるのを避ける．
@@ -405,7 +382,8 @@ def start_ocr_subprocess(shot_dir: Path):
     OCR を非同期で開始して Popen を返す．
     後で communicate() / wait() して終了を待つ．
     """
-    OCR_PY, OCR_SCRIPT = _resolve_ocr_subprocess_paths()
+    OCR_PY = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/bin/python"
+    OCR_SCRIPT = "/home/book/pro_book/pro_hand_book_python/detection/pro_handbook/sam_py_demo/OCR/paddle_ocr_test.py"
 
     env = os.environ.copy()
     # PaddleOCR側が親プロセスのCUDA/cuBLASを拾って不安定になるのを避ける．
@@ -5188,7 +5166,7 @@ def _make_sam_config_compat(
     *,
     sam_pts_side: tuple[int, int] = (32, 8),
     sam_decoder_k_keep: int = 1,
-    sam_target_len: int = 1024,
+    sam_target_len: int = 768,
 ):
     """
     infer_for_storage.py の版によって SamConfig の引数が異なるため，
@@ -5218,7 +5196,7 @@ def _get_sam_runner_compat(
     *,
     sam_pts_side: tuple[int, int] = (32, 8),
     sam_decoder_k_keep: int = 1,
-    sam_target_len: int = 1024,
+    sam_target_len: int = 768,
     use_cache: bool = True,
 ):
     key = (
@@ -6405,1783 +6383,6 @@ def _apply_mask_to_depth_no_save(depth_masked: np.ndarray, mask01: np.ndarray) -
     return out
 
 
-def _polygon_to_mask(poly, image_shape: tuple[int, int]) -> np.ndarray | None:
-    poly = _poly_from_any(poly)
-    if poly is None:
-        return None
-    h, w = int(image_shape[0]), int(image_shape[1])
-    pts = np.asarray(poly, dtype=np.float32).reshape(-1, 2).copy()
-    if pts.shape[0] < 3:
-        return None
-    pts[:, 0] = np.clip(pts[:, 0], 0, w - 1)
-    pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
-    out = np.zeros((h, w), dtype=np.uint8)
-    cv2.fillPoly(out, [np.round(pts).astype(np.int32).reshape(-1, 1, 2)], 1)
-    return out
-
-
-def _polygon_core_to_mask(poly, image_shape: tuple[int, int], core_scale: float = 0.65) -> np.ndarray | None:
-    poly = _poly_from_any(poly)
-    if poly is None:
-        return None
-    pts = np.asarray(poly, dtype=np.float32).reshape(-1, 2)
-    if pts.shape[0] < 3:
-        return None
-    center = pts.mean(axis=0, keepdims=True)
-    scale = float(np.clip(float(core_scale), 0.10, 1.0))
-    core_pts = center + (pts - center) * scale
-    return _polygon_to_mask(core_pts, image_shape)
-
-
-def build_initial_mask_quality(
-    mask01: np.ndarray,
-    refine_info: dict | None,
-    image_shape: tuple[int, int],
-) -> dict:
-    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
-    info = {
-        "selected_mask_area_px": int(mask01.sum()),
-        "ocr_polygon_area_px": None,
-        "ocr_polygon_overlap_with_selected_mask": None,
-        "ocr_center_inside_selected_mask": None,
-        "mask_centroid_to_ocr_center_px": None,
-        "mask_axis_to_ocr_axis_angle_deg": None,
-        "ocr_core_coverage_by_mask": None,
-        "initial_mask_unreliable": False,
-        "initial_mask_unreliable_reasons": [],
-    }
-
-    rinfo = refine_info or {}
-    selected = rinfo.get("selected_ocr_polygon") if isinstance(rinfo, dict) else None
-    if not isinstance(selected, dict):
-        info["initial_mask_unreliable_reasons"].append("selected_ocr_polygon_unavailable")
-        info["initial_mask_unreliable"] = True
-        return info
-
-    poly = _poly_from_any(selected.get("poly"))
-    poly_mask = _polygon_to_mask(poly, image_shape)
-    if poly is None or poly_mask is None or int(poly_mask.sum()) <= 0:
-        info["initial_mask_unreliable_reasons"].append("ocr_polygon_invalid")
-        info["initial_mask_unreliable"] = True
-        return info
-
-    poly_area = int(poly_mask.sum())
-    overlap = int(((poly_mask > 0) & (mask01 > 0)).sum())
-    info["ocr_polygon_area_px"] = int(poly_area)
-    info["ocr_polygon_overlap_with_selected_mask"] = float(overlap / max(poly_area, 1))
-    info["ocr_core_coverage_by_mask"] = float(overlap / max(poly_area, 1))
-
-    ocr_center, ocr_axis_raw, _, _ = _polygon_center_and_axis(poly)
-    if ocr_center is not None:
-        cx, cy = int(round(float(ocr_center[0]))), int(round(float(ocr_center[1])))
-        h, w = mask01.shape[:2]
-        inside_img = (0 <= cx < w) and (0 <= cy < h)
-        inside_mask = bool(inside_img and mask01[cy, cx] > 0)
-        info["ocr_center_inside_selected_mask"] = inside_mask
-        mcent = _mask_centroid(mask01)
-        if mcent is not None:
-            info["mask_centroid_to_ocr_center_px"] = float(np.linalg.norm(mcent - np.asarray(ocr_center, dtype=np.float64)))
-
-    mask_axis = _mask_pca_axis(mask01)
-    if ocr_axis_raw is not None and mask_axis is not None:
-        ocr_axis, _ = _choose_axis_consistent_with_mask(ocr_axis_raw, mask_axis)
-        ocr_axis = np.asarray(ocr_axis, dtype=np.float64)
-        mask_axis = np.asarray(mask_axis, dtype=np.float64)
-        denom = max(float(np.linalg.norm(ocr_axis) * np.linalg.norm(mask_axis)), 1e-9)
-        dot = abs(float(np.dot(ocr_axis, mask_axis)) / denom)
-        dot = float(np.clip(dot, -1.0, 1.0))
-        info["mask_axis_to_ocr_axis_angle_deg"] = float(np.degrees(np.arccos(dot)))
-
-    reasons = info["initial_mask_unreliable_reasons"]
-    overlap_ratio = info.get("ocr_polygon_overlap_with_selected_mask")
-    if overlap_ratio is not None and overlap_ratio < 0.20:
-        reasons.append(f"low_ocr_polygon_overlap={overlap_ratio:.3f}")
-    if info.get("ocr_center_inside_selected_mask") is False:
-        reasons.append("ocr_center_outside_selected_mask")
-    angle = info.get("mask_axis_to_ocr_axis_angle_deg")
-    if angle is not None and angle > 35.0:
-        reasons.append(f"mask_axis_ocr_axis_mismatch_deg={angle:.1f}")
-    dist = info.get("mask_centroid_to_ocr_center_px")
-    if dist is not None and dist > 180.0:
-        reasons.append(f"mask_centroid_far_from_ocr_center_px={dist:.1f}")
-    info["initial_mask_unreliable"] = bool(reasons)
-    return info
-
-
-def _axis_profile_for_mask(mask01: np.ndarray, depth_masked: np.ndarray, refine_info: dict | None, intr, depth_scale: float) -> dict:
-    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
-    depth_masked = np.asarray(depth_masked)
-    valid = (mask01 > 0) & (depth_masked > 0)
-    out = {
-        "axis_available": False,
-        "center_available": False,
-        "t_percentiles": None,
-        "rectangular_mask_width_px": None,
-        "rectangular_width_mm": None,
-        "seed_width_profile_width_px": None,
-        "seed_width_profile_median_px": None,
-        "seed_width_profile_p10_px": None,
-        "seed_width_profile_p90_px": None,
-    }
-    if int(np.count_nonzero(valid)) < 20:
-        out["reason"] = "too few valid pixels"
-        return out
-
-    rinfo = refine_info or {}
-    axis = rinfo.get("axis")
-    center = rinfo.get("ocr_center")
-    selected = rinfo.get("selected_ocr_polygon") if isinstance(rinfo, dict) else None
-    if isinstance(selected, dict):
-        poly = _poly_from_any(selected.get("poly"))
-        if poly is not None:
-            c_poly, axis_poly, _, _ = _polygon_center_and_axis(poly)
-            mask_axis = _mask_pca_axis(mask01)
-            if axis_poly is not None:
-                axis, _ = _choose_axis_consistent_with_mask(axis_poly, mask_axis)
-            if c_poly is not None:
-                center = c_poly
-
-    if axis is None or center is None:
-        out["reason"] = "axis or center unavailable"
-        return out
-
-    axis = np.asarray(axis, dtype=np.float64).reshape(2)
-    center = np.asarray(center, dtype=np.float64).reshape(2)
-    an = float(np.linalg.norm(axis))
-    if an < 1e-9:
-        out["reason"] = "invalid axis"
-        return out
-    axis = axis / an
-    normal = np.asarray([-axis[1], axis[0]], dtype=np.float64)
-    out["axis_available"] = True
-    out["center_available"] = True
-    out["axis"] = [float(axis[0]), float(axis[1])]
-    out["normal"] = [float(normal[0]), float(normal[1])]
-    out["center"] = [float(center[0]), float(center[1])]
-
-    ys, xs = np.where(valid)
-    pts = np.stack([xs.astype(np.float64), ys.astype(np.float64)], axis=1)
-    rel = pts - center
-    s_vals = rel @ axis
-    t_vals = rel @ normal
-    percentiles = [0, 1, 2, 5, 10, 50, 90, 95, 98, 99, 100]
-    try:
-        q = np.percentile(t_vals, percentiles)
-        out["t_percentiles"] = {f"p{int(p)}": float(v) for p, v in zip(percentiles, q)}
-        out["rectangular_mask_width_px"] = float(out["t_percentiles"]["p98"] - out["t_percentiles"]["p2"])
-        z_med_m = float(np.median(depth_masked[valid]) * float(depth_scale))
-        scale_m_per_px = z_med_m * float(np.sqrt((normal[0] / float(intr.fx)) ** 2 + (normal[1] / float(intr.fy)) ** 2))
-        out["rectangular_width_mm"] = float(out["rectangular_mask_width_px"] * scale_m_per_px * 1000.0)
-    except Exception as e:
-        out["percentile_error"] = str(e)
-
-    try:
-        s0, s1 = np.percentile(s_vals, [10.0, 90.0])
-        widths = []
-        if np.isfinite(s0) and np.isfinite(s1) and s1 > s0:
-            n_bins = max(8, min(80, int(round((float(s1) - float(s0)) / 5.0))))
-            edges = np.linspace(float(s0), float(s1), n_bins + 1)
-            for bi in range(n_bins):
-                m = (s_vals >= edges[bi]) & (s_vals < edges[bi + 1])
-                if int(np.count_nonzero(m)) < 8:
-                    continue
-                t0, t1 = np.percentile(t_vals[m], [2.0, 98.0])
-                widths.append(float(max(0.0, float(t1) - float(t0))))
-        if len(widths) >= 4:
-            widths_np = np.asarray(widths, dtype=np.float64)
-            out["seed_width_profile_width_px"] = float(np.percentile(widths_np, 2.0))
-            out["seed_width_profile_median_px"] = float(np.median(widths_np))
-            out["seed_width_profile_p10_px"] = float(np.percentile(widths_np, 10.0))
-            out["seed_width_profile_p90_px"] = float(np.percentile(widths_np, 90.0))
-            out["seed_width_profile_num_slices"] = int(len(widths_np))
-    except Exception as e:
-        out["seed_width_profile_error"] = str(e)
-    return out
-
-
-def build_clean_rectangle_analysis(
-    mask01: np.ndarray,
-    depth_masked: np.ndarray,
-    shape_info: dict | None,
-    refine_info: dict | None,
-    intr,
-    depth_scale: float,
-    *,
-    clean_rectangle_skip_used: bool,
-) -> dict:
-    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
-    shape = shape_info or {}
-    h, w = mask01.shape[:2]
-    ys, xs = np.where(mask01 > 0)
-    bbox_w = int(xs.max() - xs.min() + 1) if xs.size else 0
-    bbox_h = int(ys.max() - ys.min() + 1) if ys.size else 0
-    axis_profile = _axis_profile_for_mask(mask01, depth_masked, refine_info, intr, depth_scale)
-    selected = (refine_info or {}).get("selected_ocr_polygon") if isinstance(refine_info, dict) else None
-    ocr_short_len = None
-    if isinstance(selected, dict):
-        try:
-            poly = _poly_from_any(selected.get("poly"))
-            _, _, short_len, _ = _polygon_center_and_axis(poly)
-            ocr_short_len = None if short_len is None else float(short_len)
-        except Exception:
-            ocr_short_len = None
-    rectangularity_values = []
-    for key in ("rotated_rect_iou", "extent", "solidity"):
-        try:
-            rectangularity_values.append(float(shape.get(key)))
-        except Exception:
-            pass
-    rectangularity_score = float(np.mean(rectangularity_values)) if rectangularity_values else None
-    return {
-        "clean_rectangle_detected": bool(shape.get("clean_rectangle", False)),
-        "clean_rectangle_skip_used": bool(clean_rectangle_skip_used),
-        "clean_rectangle_reason": shape.get("reason"),
-        "rectangularity_score": rectangularity_score,
-        "mask_area_px": int(shape.get("area_px", int(mask01.sum()))),
-        "mask_width_px": int(bbox_w),
-        "mask_height_px": int(bbox_h),
-        "image_shape": [int(h), int(w)],
-        "rectangular_mask_width_px": axis_profile.get("rectangular_mask_width_px"),
-        "rectangular_width_mm": axis_profile.get("rectangular_width_mm"),
-        "axis_pixel_width_mm": None,
-        "pca_width_mm": None,
-        "width_method_used": None,
-        "ocr_short_len_px": ocr_short_len,
-        "seed_width_profile_width_px": axis_profile.get("seed_width_profile_width_px"),
-        "seed_width_profile_median_px": axis_profile.get("seed_width_profile_median_px"),
-        "seed_width_profile_p10_px": axis_profile.get("seed_width_profile_p10_px"),
-        "seed_width_profile_p90_px": axis_profile.get("seed_width_profile_p90_px"),
-        "seed_width_profile_num_slices": axis_profile.get("seed_width_profile_num_slices"),
-        "t_percentiles": axis_profile.get("t_percentiles"),
-        "axis_profile": axis_profile,
-    }
-
-
-def _estimate_width_mm_for_debug(mask01: np.ndarray, depth_masked: np.ndarray, intr, depth_scale: float, column_info=None, refine_info=None) -> tuple[float | None, str | None, dict]:
-    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
-    depth_masked = _apply_mask_to_depth_no_save(depth_masked, mask01)
-    width_m, width_info = estimate_book_width_from_filtered_mask_axis(
-        mask01=mask01,
-        depth_masked=depth_masked,
-        intr=intr,
-        depth_scale=depth_scale,
-        column_info=column_info or {},
-        refine_info=refine_info or {},
-    )
-    if width_m is not None:
-        method = width_info.get("method") if isinstance(width_info, dict) else "axis_pixel_width"
-        return float(width_m * 1000.0), method, width_info
-
-    try:
-        yaw_info = calculate_yaw(mask01, depth_masked, intr, depth_scale)
-        pts_f = yaw_info["points"]
-        if np.asarray(pts_f).shape[0] < 3:
-            return None, "estimate_failed_too_few_points", {"axis_width_info": width_info}
-        mean, pc1, pc2 = pca_axes_fix_dir(pts_f)
-        pca_info = estimate_book_width(pts_f, mean, pc1, pc2)
-        width_m = pca_info.get("av_book_width_m") if isinstance(pca_info, dict) else None
-        if width_m is None:
-            return None, "estimate_book_width_3d_pca_failed", {"axis_width_info": width_info, "pca_info": pca_info}
-        return float(width_m * 1000.0), "estimate_book_width_3d_pca", {"axis_width_info": width_info, "pca_info": pca_info}
-    except Exception as e:
-        return None, "estimate_exception", {"axis_width_info": width_info, "error": str(e)}
-
-
-def _largest_component_ratio(mask01: np.ndarray) -> float | None:
-    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
-    area = int(mask01.sum())
-    if area <= 0:
-        return None
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask01, connectivity=8)
-    if num_labels <= 1:
-        return None
-    largest = int(np.max(stats[1:, cv2.CC_STAT_AREA]))
-    return float(largest / max(area, 1))
-
-
-def save_clean_rectangle_shadow_debug(
-    shot_dir: Path,
-    color_np: np.ndarray,
-    original_mask: np.ndarray,
-    shadow_mask: np.ndarray,
-    stem: str,
-) -> list[str]:
-    debug_dir = Path(shot_dir) / "debug_clean_rectangle_shadow"
-    debug_dir.mkdir(parents=True, exist_ok=True)
-    original_mask = (np.asarray(original_mask) > 0).astype(np.uint8)
-    shadow_mask = (np.asarray(shadow_mask) > 0).astype(np.uint8)
-
-    def _overlay(mask, color):
-        overlay = color_np.copy()
-        overlay[mask > 0] = color
-        return cv2.addWeighted(color_np, 0.65, overlay, 0.35, 0)
-
-    original_path = debug_dir / f"{stem}_clean_rectangle_original_overlay.png"
-    shadow_path = debug_dir / f"{stem}_clean_rectangle_shadow_overlay.png"
-    diff_path = debug_dir / f"{stem}_clean_rectangle_original_vs_shadow_diff.png"
-    cv2.imwrite(str(original_path), _overlay(original_mask, (0, 255, 0)))
-    cv2.imwrite(str(shadow_path), _overlay(shadow_mask, (0, 255, 0)))
-
-    common = (original_mask > 0) & (shadow_mask > 0)
-    removed = (original_mask > 0) & (shadow_mask == 0)
-    added = (original_mask == 0) & (shadow_mask > 0)
-    diff = color_np.copy()
-    diff[common] = (0, 255, 0)
-    diff[removed] = (255, 0, 0)
-    diff[added] = (0, 0, 255)
-    diff = cv2.addWeighted(color_np, 0.55, diff, 0.45, 0)
-    cv2.imwrite(str(diff_path), diff)
-    return [str(original_path), str(shadow_path), str(diff_path)]
-
-
-def evaluate_clean_rectangle_shadow_candidate(
-    *,
-    shot_dir: Path,
-    color_np: np.ndarray,
-    mask01: np.ndarray,
-    depth_masked: np.ndarray,
-    merged: dict,
-    query: str,
-    refine_info_seed: dict | None,
-    shape_info: dict | None,
-    intr,
-    depth_scale: float,
-    result_suffix: str,
-    sel_idx: int,
-) -> dict:
-    original_mask = (np.asarray(mask01) > 0).astype(np.uint8)
-    original_depth = _apply_mask_to_depth_no_save(depth_masked, original_mask)
-    original_valid = int(np.count_nonzero((original_mask > 0) & (original_depth > 0)))
-    out = {
-        "evaluated": False,
-        "reason": "not started",
-        "original_width_mm": None,
-        "shadow_width_mm": None,
-        "original_width_method": None,
-        "shadow_width_method": None,
-        "original_mask_area": int(original_mask.sum()),
-        "shadow_mask_area": None,
-        "shadow_keep_ratio": None,
-        "shadow_removed_count": None,
-        "shadow_reject_reasons": [],
-        "shadow_candidate_accepted_by_internal_checks": False,
-        "shadow_candidate_not_adopted_reason": "shadow_only",
-        "shadow_debug_files": [],
-    }
-    if not bool((shape_info or {}).get("clean_rectangle", False)):
-        out["reason"] = "not clean rectangle"
-        return out
-
-    original_width_mm, original_method, original_info = _estimate_width_mm_for_debug(
-        original_mask,
-        original_depth,
-        intr,
-        depth_scale,
-        column_info={},
-        refine_info=refine_info_seed or {},
-    )
-    out["original_width_mm"] = original_width_mm
-    out["original_width_method"] = original_method
-    out["original_width_info"] = original_info
-
-    shadow_refine_info = refine_info_seed if isinstance(refine_info_seed, dict) else None
-    if not isinstance(shadow_refine_info, dict) or not isinstance(shadow_refine_info.get("selected_ocr_polygon"), dict):
-        _, shadow_refine_info = refine_mask_by_ocr_axis_band(
-            mask01=original_mask,
-            merged=merged,
-            image_shape=color_np.shape[:2],
-            shot_dir=shot_dir,
-            query=query,
-            mask_width_ratio=1.05,
-            min_keep_ratio=0.85,
-            use_ocr_short_width=False,
-            ocr_short_to_half_width_scale=1.35,
-            min_ocr_half_width_px=28.0,
-            suppress_side_protrusions=False,
-            profile_bin_size_px=8.0,
-            profile_width_margin=1.15,
-            min_profile_half_width_px=16.0,
-            max_profile_shrink_ratio=0.35,
-            return_info=True,
-        )
-    if not isinstance(shadow_refine_info, dict) or not isinstance(shadow_refine_info.get("selected_ocr_polygon"), dict):
-        out.update({"evaluated": True, "reason": "selected OCR polygon unavailable for shadow"})
-        out["shadow_reject_reasons"].append("selected_ocr_polygon_unavailable")
-        save_json(Path(shot_dir) / "debug_clean_rectangle_shadow" / f"mask{sel_idx}{result_suffix}_clean_rectangle_shadow_log.json", out)
-        return out
-
-    shadow_refine_info = dict(shadow_refine_info)
-    shadow_refine_info["shape_rectangularity"] = shape_info
-    reject_reasons = []
-
-    def _run_shadow_column(use_guard: bool):
-        return refine_mask_by_spine_column_length_after_depth(
-            mask01=original_mask.copy(),
-            depth_masked=original_depth.copy(),
-            refine_info=shadow_refine_info,
-            image_shape=color_np.shape[:2],
-            t_bin_size_px=4.0,
-            s_bin_size_px=5.0,
-            s_gap_allow_px=28.0,
-            length_reference_mode="robust_percentile",
-            length_reference_percentile=100.0,
-            min_length_ratio=0.95,
-            relaxed_edge_length_ratio=0.95,
-            min_points_per_t_bin=6,
-            min_selected_t_bins=2,
-            expand_selected_t_bins=0,
-            s_margin_px=0.0,
-            min_valid_keep_ratio=0.35,
-            seed_local_window_bins=14,
-            bridge_gap_bins=2,
-            use_global_s_range=False,
-            span_percentiles=(2.0, 98.0),
-            min_occupancy_density=0.18,
-            column_length_mode="continuous_run",
-            min_run_point_ratio=0.18,
-            use_seed_width_guard=bool(use_guard),
-            seed_width_guard_scale=1.05,
-            seed_width_mask_percentile=2.0,
-            seed_width_low_percentile_min_median_ratio=0.50,
-            seed_width_fallback_mode="median",
-            seed_guard_center_mode="mask_centroid",
-            seed_width_profile_s_percentiles=(10.0, 90.0),
-            seed_width_profile_t_percentiles=(2.0, 98.0),
-            min_seed_guard_width_px=30.0,
-            max_seed_guard_width_px=90.0,
-            one_sided_removal=True,
-            one_sided_min_candidate_points=30,
-            one_sided_score_margin_ratio=1.05,
-            protect_ocr_extended_band=True,
-            ocr_extended_protection_margin_px=0.0,
-            ocr_extended_max_rescue_ratio=0.55,
-            post_profile_side_suppression=True,
-            post_profile_width_margin=1.12,
-            post_profile_max_shrink_ratio=0.22,
-            return_info=True,
-        )
-
-    def _score_shadow(mask_candidate, info_candidate):
-        if not isinstance(info_candidate, dict) or not bool(info_candidate.get("used", False)):
-            return -1.0e8, analyze_mask_rectangularity(mask_candidate, image_shape=color_np.shape[:2])
-        shape_candidate = analyze_mask_rectangularity(mask_candidate, image_shape=color_np.shape[:2])
-        keep = float(info_candidate.get("valid_keep_ratio", 0.0))
-        score = 0.0
-        score += 3.0 * float(shape_candidate.get("rotated_rect_iou", 0.0))
-        score += 2.0 * float(shape_candidate.get("extent", 0.0))
-        score += 2.0 * float(shape_candidate.get("solidity", 0.0))
-        score -= 2.2 * min(float(shape_candidate.get("width_cv", 999.0)), 5.0)
-        score -= 1.4 * max(0.0, min(float(shape_candidate.get("width_max_over_median", 999.0)), 10.0) - 1.15)
-        if keep < 0.35:
-            score -= 100.0
-        return float(score), shape_candidate
-
-    mask_no_guard, depth_no_guard, info_no_guard = _run_shadow_column(False)
-    score_no_guard, shape_no_guard = _score_shadow(mask_no_guard, info_no_guard)
-    mask_guard, depth_guard, info_guard = _run_shadow_column(True)
-    score_guard, shape_guard = _score_shadow(mask_guard, info_guard)
-    if score_guard > score_no_guard:
-        shadow_mask, shadow_depth, shadow_column_info = mask_guard, depth_guard, info_guard
-        selected_mode = "seed_width_guard_true"
-        selected_score = score_guard
-        selected_shape = shape_guard
-    else:
-        shadow_mask, shadow_depth, shadow_column_info = mask_no_guard, depth_no_guard, info_no_guard
-        selected_mode = "seed_width_guard_false"
-        selected_score = score_no_guard
-        selected_shape = shape_no_guard
-
-    shadow_column_info = dict(shadow_column_info or {})
-    shadow_column_info["auto_seed_width_guard_selection"] = {
-        "selected": selected_mode,
-        "score_false": float(score_no_guard),
-        "score_true": float(score_guard),
-        "shape_false": shape_no_guard,
-        "shape_true": shape_guard,
-    }
-    shadow_before_final_clip = shadow_mask.copy()
-    shadow_depth_before_final_clip = shadow_depth.copy()
-    shadow_mask, shadow_depth, final_clip_info = apply_final_t_width_clip(
-        mask01=shadow_mask,
-        depth_masked=shadow_depth,
-        column_info=shadow_column_info,
-        image_shape=color_np.shape[:2],
-        width_scale=1.05,
-        margin_px=2.0,
-        min_keep_ratio=0.55,
-        center_mode="ocr_center",
-        min_width_px=24.0,
-        max_width_px=90.0,
-        require_shape_not_worse=True,
-    )
-    shadow_column_info["final_t_width_clip"] = final_clip_info
-    shadow_mask, shadow_depth, one_sided_info = apply_one_sided_short_column_prune_after_final(
-        mask01=shadow_mask,
-        depth_masked=shadow_depth,
-        column_info=shadow_column_info,
-        refine_info=shadow_refine_info,
-        image_shape=color_np.shape[:2],
-        side_reference_mask_before=shadow_before_final_clip,
-        side_reference_mask_after=shadow_mask,
-        side_reference_depth_before=shadow_depth_before_final_clip,
-        t_bin_size_px=4.0,
-        span_percentiles=(2.0, 98.0),
-        length_ratio=0.95,
-        min_points_per_t_bin=6,
-        min_side_removed_pixels=30,
-        min_valid_keep_ratio=0.60,
-        max_removed_ratio=0.45,
-        protect_seed_band_px=0.0,
-        small_component_area_ratio=0.0003,
-        require_shape_not_worse=False,
-        return_info=True,
-    )
-    shadow_column_info["one_sided_post_final_column_prune"] = one_sided_info
-
-    shadow_valid = int(np.count_nonzero((shadow_mask > 0) & (shadow_depth > 0)))
-    keep_ratio = float(shadow_valid / max(original_valid, 1))
-    removed_count = int(original_valid - shadow_valid)
-    shadow_width_mm, shadow_method, shadow_width_info = _estimate_width_mm_for_debug(
-        shadow_mask,
-        shadow_depth,
-        intr,
-        depth_scale,
-        column_info=shadow_column_info,
-        refine_info=shadow_refine_info,
-    )
-    component_ratio = _largest_component_ratio(shadow_mask)
-    selected_ocr_core_removed_count = None
-    selected_ocr_polygon_removed_count = None
-    selected = shadow_refine_info.get("selected_ocr_polygon") if isinstance(shadow_refine_info, dict) else None
-    if isinstance(selected, dict):
-        full_mask = _polygon_to_mask(selected.get("poly"), color_np.shape[:2])
-        if full_mask is not None:
-            selected_ocr_polygon_removed_count = int(np.count_nonzero((full_mask > 0) & (original_mask > 0) & (shadow_mask == 0)))
-        core_mask = _polygon_core_to_mask(selected.get("poly"), color_np.shape[:2], core_scale=0.65)
-        if core_mask is not None:
-            selected_ocr_core_removed_count = int(np.count_nonzero((core_mask > 0) & (original_mask > 0) & (shadow_mask == 0)))
-    if shadow_valid <= 0:
-        reject_reasons.append("shadow_candidate_empty")
-    if keep_ratio < 0.35:
-        reject_reasons.append(f"shadow_keep_ratio_too_low={keep_ratio:.3f}")
-    if component_ratio is not None and component_ratio < 0.75:
-        reject_reasons.append(f"shadow_fragmented_largest_component_ratio={component_ratio:.3f}")
-    if shadow_width_mm is None:
-        reject_reasons.append("shadow_width_unavailable")
-    elif original_width_mm is not None and shadow_width_mm < 0.45 * original_width_mm:
-        reject_reasons.append("shadow_width_collapsed_vs_original")
-    if selected_ocr_core_removed_count not in (None, 0):
-        reject_reasons.append(f"selected_ocr_core_removed_count={selected_ocr_core_removed_count}")
-    if not bool(shadow_column_info.get("used", False)):
-        reject_reasons.append("shadow_column_refine_not_used")
-
-    debug_files = save_clean_rectangle_shadow_debug(
-        shot_dir=shot_dir,
-        color_np=color_np,
-        original_mask=original_mask,
-        shadow_mask=shadow_mask,
-        stem=f"mask{sel_idx}{result_suffix}",
-    )
-    out.update({
-        "evaluated": True,
-        "reason": "shadow_candidate_computed",
-        "shadow_width_mm": shadow_width_mm,
-        "shadow_width_method": shadow_method,
-        "shadow_mask_area": int(np.asarray(shadow_mask).sum()),
-        "shadow_keep_ratio": float(keep_ratio),
-        "shadow_removed_count": int(removed_count),
-        "shadow_reject_reasons": reject_reasons,
-        "shadow_candidate_accepted_by_internal_checks": bool(len(reject_reasons) == 0),
-        "shadow_debug_files": debug_files,
-        "shadow_selected_mode": selected_mode,
-        "shadow_selected_score": float(selected_score),
-        "shadow_selected_shape": selected_shape,
-        "shadow_column_info_summary": {
-            "used": bool(shadow_column_info.get("used", False)),
-            "reason": shadow_column_info.get("reason"),
-            "valid_keep_ratio": shadow_column_info.get("valid_keep_ratio"),
-            "selected_group": shadow_column_info.get("selected_group"),
-            "seed_guard_used": shadow_column_info.get("seed_guard_used"),
-            "final_t_width_clip": final_clip_info,
-            "one_sided_post_final_column_prune": one_sided_info,
-        },
-        "shadow_width_info": shadow_width_info,
-        "largest_component_ratio": component_ratio,
-        "selected_ocr_core_removed_count": selected_ocr_core_removed_count,
-        "selected_ocr_polygon_removed_count": selected_ocr_polygon_removed_count,
-        "selected_ocr_core_scale": 0.65,
-    })
-    save_json(Path(shot_dir) / "debug_clean_rectangle_shadow" / f"mask{sel_idx}{result_suffix}_clean_rectangle_shadow_log.json", out)
-    out["_shadow_mask01"] = shadow_mask.astype(np.uint8)
-    out["_shadow_depth_masked"] = np.asarray(shadow_depth).copy()
-    out["_shadow_column_info"] = shadow_column_info
-    out["_shadow_refine_info"] = shadow_refine_info
-    return out
-
-
-def decide_clean_rectangle_override(
-    clean_rectangle_shadow: dict | None,
-    initial_mask_quality: dict | None,
-    clean_rectangle_analysis: dict | None,
-) -> dict:
-    shadow = clean_rectangle_shadow or {}
-    imq = initial_mask_quality or {}
-    analysis = clean_rectangle_analysis or {}
-    reject_reasons = []
-    adopt_reasons = []
-
-    def _f(value):
-        try:
-            if value is None:
-                return None
-            v = float(value)
-            return v if np.isfinite(v) else None
-        except Exception:
-            return None
-
-    clean_skip = bool(analysis.get("clean_rectangle_skip_used", False))
-    shadow_evaluated = bool(shadow.get("evaluated", False))
-    shadow_internal_ok = bool(shadow.get("shadow_candidate_accepted_by_internal_checks", False))
-    initial_unreliable = bool(imq.get("initial_mask_unreliable", True))
-    original_width = _f(shadow.get("original_width_mm"))
-    shadow_width = _f(shadow.get("shadow_width_mm"))
-    keep_ratio = _f(shadow.get("shadow_keep_ratio"))
-    selected_ocr_core_removed_count = shadow.get("selected_ocr_core_removed_count")
-    rectangular_width = _f(analysis.get("rectangular_width_mm"))
-
-    if not clean_skip:
-        reject_reasons.append("clean_rectangle_skip_not_used")
-    else:
-        adopt_reasons.append("clean_rectangle_skip_used")
-
-    if not shadow_evaluated:
-        reject_reasons.append("shadow_not_evaluated")
-    else:
-        adopt_reasons.append("shadow_evaluated")
-
-    if not shadow_internal_ok:
-        reject_reasons.append("shadow_internal_checks_failed")
-    else:
-        adopt_reasons.append("shadow_internal_checks_passed")
-
-    if initial_unreliable:
-        reject_reasons.append("initial_mask_unreliable")
-    else:
-        adopt_reasons.append("initial_mask_reliable")
-
-    if keep_ratio is None:
-        reject_reasons.append("shadow_keep_ratio_unavailable")
-    elif keep_ratio < 0.60 or keep_ratio > 0.90:
-        reject_reasons.append(f"shadow_keep_ratio_out_of_range={keep_ratio:.3f}")
-    else:
-        adopt_reasons.append(f"shadow_keep_ratio_safe={keep_ratio:.3f}")
-
-    if original_width is None or shadow_width is None:
-        reject_reasons.append("width_before_or_after_unavailable")
-    else:
-        if shadow_width < 5.0:
-            reject_reasons.append(f"shadow_width_too_small={shadow_width:.3f}")
-        if shadow_width < 0.55 * original_width:
-            reject_reasons.append(f"shadow_width_collapsed_vs_original={shadow_width:.3f}/{original_width:.3f}")
-        width_ratio = float(original_width / max(shadow_width, 1e-6))
-        rectangular_ratio = None if rectangular_width is None else float(rectangular_width / max(shadow_width, 1e-6))
-        if width_ratio > 1.20 or (rectangular_ratio is not None and rectangular_ratio > 1.20):
-            adopt_reasons.append(f"width_disagreement_original_to_shadow={width_ratio:.3f}")
-        else:
-            reject_reasons.append(f"width_disagreement_too_small_original_to_shadow={width_ratio:.3f}")
-
-    if selected_ocr_core_removed_count is None:
-        reject_reasons.append("selected_ocr_core_removed_count_unavailable")
-    elif int(selected_ocr_core_removed_count) != 0:
-        reject_reasons.append(f"selected_ocr_core_removed_count={int(selected_ocr_core_removed_count)}")
-    else:
-        adopt_reasons.append("selected_ocr_core_preserved")
-
-    width_ratio_original_to_shadow = None
-    if original_width is not None and shadow_width is not None:
-        width_ratio_original_to_shadow = float(original_width / max(shadow_width, 1e-6))
-
-    return {
-        "evaluated": True,
-        "adopted": bool(len(reject_reasons) == 0),
-        "reason": "candidate_accepted" if len(reject_reasons) == 0 else "candidate_rejected",
-        "clean_rectangle_skip_used": bool(clean_skip),
-        "original_width_mm": original_width,
-        "shadow_width_mm": shadow_width,
-        "original_mask_area": shadow.get("original_mask_area"),
-        "shadow_mask_area": shadow.get("shadow_mask_area"),
-        "shadow_keep_ratio": keep_ratio,
-        "shadow_removed_count": shadow.get("shadow_removed_count"),
-        "initial_mask_unreliable": bool(initial_unreliable),
-        "shadow_candidate_accepted_by_internal_checks": bool(shadow_internal_ok),
-        "selected_ocr_core_removed_count": selected_ocr_core_removed_count,
-        "width_ratio_original_to_shadow": width_ratio_original_to_shadow,
-        "rectangular_width_mm": rectangular_width,
-        "rectangular_mask_width_px": analysis.get("rectangular_mask_width_px"),
-        "shadow_width_px": (shadow.get("shadow_width_info") or {}).get("width_px") if isinstance(shadow.get("shadow_width_info"), dict) else None,
-        "seed_width_profile_width_px": analysis.get("seed_width_profile_width_px"),
-        "seed_width_profile_median_px": analysis.get("seed_width_profile_median_px"),
-        "adopt_reasons": adopt_reasons,
-        "reject_reasons": reject_reasons,
-    }
-
-
-def _jsonable_for_residual_diagnostics(value):
-    if isinstance(value, dict):
-        return {str(k): _jsonable_for_residual_diagnostics(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable_for_residual_diagnostics(v) for v in value]
-    if isinstance(value, np.ndarray):
-        return _jsonable_for_residual_diagnostics(value.tolist())
-    if isinstance(value, (np.integer,)):
-        return int(value)
-    if isinstance(value, (np.floating,)):
-        v = float(value)
-        return v if np.isfinite(v) else None
-    if isinstance(value, (np.bool_,)):
-        return bool(value)
-    return value
-
-
-def _float_or_none(value):
-    try:
-        if value is None:
-            return None
-        v = float(value)
-        return v if np.isfinite(v) else None
-    except Exception:
-        return None
-
-
-def _stage_axis_center_from_infos(mask01: np.ndarray, refine_info: dict | None, column_info: dict | None):
-    for source_name, info, center_keys in (
-        ("column_info", column_info, ("center", "ocr_center")),
-        ("refine_info", refine_info, ("center", "ocr_center")),
-    ):
-        if not isinstance(info, dict):
-            continue
-        axis = info.get("axis")
-        center = None
-        for key in center_keys:
-            if info.get(key) is not None:
-                center = info.get(key)
-                break
-        if axis is None or center is None:
-            continue
-        try:
-            axis = np.asarray(axis, dtype=np.float64).reshape(2)
-            center = np.asarray(center, dtype=np.float64).reshape(2)
-            n = float(np.linalg.norm(axis))
-            if n > 1e-9:
-                axis = axis / n
-                normal = info.get("normal")
-                if normal is None:
-                    normal = np.asarray([-axis[1], axis[0]], dtype=np.float64)
-                else:
-                    normal = np.asarray(normal, dtype=np.float64).reshape(2)
-                    nn = float(np.linalg.norm(normal))
-                    normal = np.asarray([-axis[1], axis[0]], dtype=np.float64) if nn < 1e-9 else normal / nn
-                return axis, normal, center, source_name
-        except Exception:
-            pass
-
-    axis = _mask_pca_axis(mask01)
-    center = _mask_centroid(mask01)
-    if axis is None or center is None:
-        return None, None, None, "unavailable"
-    axis = np.asarray(axis, dtype=np.float64).reshape(2)
-    axis = axis / max(float(np.linalg.norm(axis)), 1e-9)
-    normal = np.asarray([-axis[1], axis[0]], dtype=np.float64)
-    return axis, normal, np.asarray(center, dtype=np.float64).reshape(2), "mask_pca_fallback"
-
-
-def _mask_component_summary(mask01: np.ndarray):
-    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
-    area = int(mask01.sum())
-    out = {
-        "area_px": area,
-        "component_count": 0,
-        "largest_component_area_px": 0,
-        "largest_component_ratio": None,
-        "bbox_xywh": None,
-        "centroid_xy": None,
-    }
-    if area <= 0:
-        return out
-
-    ys, xs = np.where(mask01 > 0)
-    out["bbox_xywh"] = [
-        int(xs.min()),
-        int(ys.min()),
-        int(xs.max() - xs.min() + 1),
-        int(ys.max() - ys.min() + 1),
-    ]
-    out["centroid_xy"] = [float(xs.mean()), float(ys.mean())]
-
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask01, connectivity=8)
-    component_count = max(0, int(num_labels) - 1)
-    out["component_count"] = component_count
-    if component_count > 0:
-        areas = stats[1:, cv2.CC_STAT_AREA].astype(np.int64)
-        largest = int(np.max(areas))
-        out["largest_component_area_px"] = largest
-        out["largest_component_ratio"] = float(largest / max(area, 1))
-    return out
-
-
-def _largest_component_mask(mask01: np.ndarray):
-    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
-    if int(mask01.sum()) <= 0:
-        return mask01
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask01, connectivity=8)
-    if num_labels <= 2:
-        return mask01
-    areas = stats[1:, cv2.CC_STAT_AREA]
-    label = int(np.argmax(areas)) + 1
-    return (labels == label).astype(np.uint8)
-
-
-def _axis_width_candidates_for_stage(
-    mask01: np.ndarray,
-    depth_masked: np.ndarray,
-    intr,
-    depth_scale: float,
-    axis: np.ndarray | None,
-    normal: np.ndarray | None,
-    center: np.ndarray | None,
-):
-    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
-    depth_masked = np.asarray(depth_masked)
-    valid = (mask01 > 0) & (depth_masked > 0)
-    if int(np.count_nonzero(valid)) < 20 or axis is None or normal is None or center is None:
-        return {}, None
-
-    ys, xs = np.where(valid)
-    pts2 = np.stack([xs.astype(np.float64), ys.astype(np.float64)], axis=1)
-    t = (pts2 - np.asarray(center, dtype=np.float64).reshape(2)) @ np.asarray(normal, dtype=np.float64).reshape(2)
-    z_values = depth_masked[valid].astype(np.float64) * float(depth_scale)
-    z_med = float(np.median(z_values))
-    if not np.isfinite(z_med) or z_med <= 0:
-        return {}, None
-    scale_m_per_px = z_med * float(np.sqrt((float(normal[0]) / float(intr.fx)) ** 2 + (float(normal[1]) / float(intr.fy)) ** 2))
-
-    candidates = {}
-    for p0, p1 in ((2.0, 98.0), (5.0, 95.0), (10.0, 90.0), (25.0, 75.0)):
-        try:
-            t0, t1 = np.percentile(t, [p0, p1])
-            width_px = float(max(0.0, float(t1) - float(t0)))
-            candidates[f"p{int(p0)}_p{int(p1)}"] = {
-                "percentiles": [float(p0), float(p1)],
-                "width_px": width_px,
-                "width_mm": float(width_px * scale_m_per_px * 1000.0),
-                "t_low": float(t0),
-                "t_high": float(t1),
-            }
-        except Exception as e:
-            candidates[f"p{int(p0)}_p{int(p1)}"] = {"error": str(e)}
-    return candidates, {
-        "z_median_m": z_med,
-        "scale_m_per_px": float(scale_m_per_px),
-        "t_min": float(np.min(t)),
-        "t_max": float(np.max(t)),
-        "t_median": float(np.median(t)),
-    }
-
-
-def _pca_width_mm_for_stage(mask01: np.ndarray, depth_masked: np.ndarray, intr, depth_scale: float):
-    try:
-        pts, _ = _mask_depth_to_points_uv_for_plane_filter(
-            (np.asarray(mask01) > 0).astype(np.uint8),
-            np.asarray(depth_masked),
-            intr,
-            depth_scale,
-        )
-        if pts.shape[0] < 20:
-            return None, {"reason": "too few points"}
-        mean, pc1, pc2 = pca_axes_fix_dir(pts)
-        info = estimate_book_width(pts, mean, pc1, pc2)
-        width_m = None
-        if isinstance(info, dict):
-            width_m = info.get("av_book_width_m") or info.get("width_m")
-        return (None if width_m is None else float(width_m) * 1000.0), info
-    except Exception as e:
-        return None, {"reason": f"pca_width_error: {e}"}
-
-
-def build_stage_width_diagnostics(
-    stage_name: str,
-    mask01: np.ndarray,
-    depth_masked: np.ndarray,
-    intr,
-    depth_scale: float,
-    refine_info: dict | None = None,
-    column_info: dict | None = None,
-    extra_info: dict | None = None,
-):
-    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
-    depth_masked = np.asarray(depth_masked)
-    valid = (mask01 > 0) & (depth_masked > 0)
-    valid_count = int(np.count_nonzero(valid))
-    axis, normal, center, axis_source = _stage_axis_center_from_infos(mask01, refine_info, column_info)
-    axis_candidates, axis_stats = _axis_width_candidates_for_stage(
-        mask01,
-        depth_masked,
-        intr,
-        depth_scale,
-        axis,
-        normal,
-        center,
-    )
-    largest_mask = _largest_component_mask(mask01)
-    largest_axis_candidates, _ = _axis_width_candidates_for_stage(
-        largest_mask,
-        depth_masked,
-        intr,
-        depth_scale,
-        axis,
-        normal,
-        center,
-    )
-    pca_width_mm, pca_width_info = _pca_width_mm_for_stage(mask01, depth_masked, intr, depth_scale)
-
-    p2 = (axis_candidates.get("p2_p98") or {}).get("width_mm")
-    p10 = (axis_candidates.get("p10_p90") or {}).get("width_mm")
-    sensitivity_mm = None
-    sensitivity_ratio = None
-    if p2 is not None and p10 is not None:
-        sensitivity_mm = float(p2 - p10)
-        sensitivity_ratio = float(p2 / max(float(p10), 1e-6))
-
-    depth_stats = {"median_m": None, "p05_m": None, "p95_m": None}
-    if valid_count > 0:
-        z = depth_masked[valid].astype(np.float64) * float(depth_scale)
-        depth_stats = {
-            "median_m": float(np.median(z)),
-            "p05_m": float(np.percentile(z, 5)),
-            "p95_m": float(np.percentile(z, 95)),
-        }
-
-    adopted_shadow_mm = p2 if p2 is not None else pca_width_mm
-    out = {
-        "stage_name": str(stage_name),
-        "mask": _mask_component_summary(mask01),
-        "valid_depth_pixel_count": valid_count,
-        "depth_stats": depth_stats,
-        "axis_source": axis_source,
-        "axis": None if axis is None else [float(axis[0]), float(axis[1])],
-        "normal": None if normal is None else [float(normal[0]), float(normal[1])],
-        "center": None if center is None else [float(center[0]), float(center[1])],
-        "axis_stats": axis_stats,
-        "axis_width_candidates": axis_candidates,
-        "largest_component_axis_width_candidates": largest_axis_candidates,
-        "axis_pixel_width_mm": p2,
-        "pca_width_mm": pca_width_mm,
-        "pca_width_info": pca_width_info,
-        "adopted_width_shadow_mm_if_stage_final": adopted_shadow_mm,
-        "width_sensitivity_p2p98_minus_p10p90_mm": sensitivity_mm,
-        "width_sensitivity_p2p98_over_p10p90": sensitivity_ratio,
-        "extra_info": extra_info or {},
-    }
-    return _jsonable_for_residual_diagnostics(out)
-
-
-def _stage_width_diff(prev_diag: dict | None, cur_diag: dict | None):
-    if not isinstance(prev_diag, dict) or not isinstance(cur_diag, dict):
-        return None
-    prev_width = _float_or_none(prev_diag.get("adopted_width_shadow_mm_if_stage_final"))
-    cur_width = _float_or_none(cur_diag.get("adopted_width_shadow_mm_if_stage_final"))
-    prev_valid = prev_diag.get("valid_depth_pixel_count")
-    cur_valid = cur_diag.get("valid_depth_pixel_count")
-    return {
-        "from_stage": prev_diag.get("stage_name"),
-        "to_stage": cur_diag.get("stage_name"),
-        "valid_count_before": prev_valid,
-        "valid_count_after": cur_valid,
-        "valid_count_delta": None if prev_valid is None or cur_valid is None else int(cur_valid) - int(prev_valid),
-        "width_shadow_mm_before": prev_width,
-        "width_shadow_mm_after": cur_width,
-        "width_shadow_mm_delta": None if prev_width is None or cur_width is None else float(cur_width - prev_width),
-    }
-
-
-def _get_residual_policy_mode() -> str:
-    mode = str(os.environ.get("RESIDUAL_POLICY_MODE", "baseline")).strip().upper()
-    mode = mode.replace("-", "_")
-    if mode in {"", "BASELINE", "NONE", "OFF", "0"}:
-        return "baseline"
-    if mode in {
-        "A",
-        "B",
-        "AB",
-        "AB_SAFE",
-        "ABSAFE",
-        "AB_SAFE_A_TUNED",
-        "AB_SAFE_TUNED",
-        "AB_SAFE_A_TUNED_V2",
-        "AB_SAFE_TUNED_V2",
-        "AB_SAFE_A_TUNED_V3",
-        "AB_SAFE_TUNED_V3",
-    }:
-        if mode == "ABSAFE":
-            return "AB_SAFE"
-        if mode == "AB_SAFE_TUNED":
-            return "AB_SAFE_A_TUNED"
-        if mode == "AB_SAFE_TUNED_V2":
-            return "AB_SAFE_A_TUNED_V2"
-        if mode == "AB_SAFE_TUNED_V3":
-            return "AB_SAFE_A_TUNED_V3"
-        return mode
-    return "baseline"
-
-
-def _residual_policy_has_a(mode: str) -> bool:
-    return str(mode).upper() in {"A", "AB", "AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"}
-
-
-def _residual_policy_has_b(mode: str) -> bool:
-    return str(mode).upper() in {"B", "AB", "AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"}
-
-
-def _residual_policy_a_variant(mode: str) -> str:
-    mode = str(mode).upper()
-    if mode in {"AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"}:
-        return "a_tuned_v2"
-    return "a_tuned" if mode == "AB_SAFE_A_TUNED" else "legacy"
-
-
-def _width_mm_from_candidates(candidates: dict | None, key: str):
-    if not isinstance(candidates, dict):
-        return None
-    return _float_or_none((candidates.get(key) or {}).get("width_mm"))
-
-
-def _residual_policy_width_snapshot(
-    mask01: np.ndarray,
-    depth_masked: np.ndarray,
-    intr,
-    depth_scale: float,
-    refine_info: dict | None,
-    column_info: dict | None,
-):
-    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
-    axis, normal, center, axis_source = _stage_axis_center_from_infos(mask01, refine_info, column_info)
-    candidates, axis_stats = _axis_width_candidates_for_stage(
-        mask01,
-        depth_masked,
-        intr,
-        depth_scale,
-        axis,
-        normal,
-        center,
-    )
-    largest_mask = _largest_component_mask(mask01)
-    largest_candidates, _ = _axis_width_candidates_for_stage(
-        largest_mask,
-        depth_masked,
-        intr,
-        depth_scale,
-        axis,
-        normal,
-        center,
-    )
-    mask_info = _mask_component_summary(mask01)
-    return _jsonable_for_residual_diagnostics({
-        "axis_source": axis_source,
-        "axis_width_candidates": candidates,
-        "largest_component_axis_width_candidates": largest_candidates,
-        "axis_stats": axis_stats,
-        "mask": mask_info,
-        "valid_depth_pixel_count": int(np.count_nonzero((mask01 > 0) & (np.asarray(depth_masked) > 0))),
-    })
-
-
-def _evaluate_residual_policy_a_candidate(
-    *,
-    enabled: bool,
-    policy_A_variant: str = "legacy",
-    stage: str,
-    before_mask01: np.ndarray,
-    before_depth_masked: np.ndarray,
-    candidate_mask01: np.ndarray,
-    candidate_depth_masked: np.ndarray,
-    candidate_info: dict | None,
-    intr,
-    depth_scale: float,
-    refine_info: dict | None,
-    column_info: dict | None,
-):
-    info = {
-        "enabled": bool(enabled),
-        "evaluated": False,
-        "overprune_detected": False,
-        "stage": str(stage),
-        "before_width_p2p98_mm": None,
-        "candidate_width_p2p98_mm": None,
-        "before_width_p5p95_mm": None,
-        "candidate_width_p5p95_mm": None,
-        "before_width_p10p90_mm": None,
-        "candidate_width_p10p90_mm": None,
-        "candidate_valid_keep_ratio": None,
-        "reject_candidate": False,
-        "reason": "disabled",
-        "reject_reasons": [],
-        "policy_A_variant": str(policy_A_variant),
-        "policy_A_triggered": False,
-        "policy_A_candidate_rejected": False,
-        "policy_A_candidate_kept_by_tuned_guard": False,
-        "policy_A_candidate_kept_by_tuned_v2_guard": False,
-        "policy_A_reject_reason": None,
-        "policy_A_keep_reason": None,
-        "candidate_width_mm": None,
-        "pre_a95_width_mm": None,
-        "post_a95_width_mm": None,
-        "p2_p98_width_mm": None,
-        "p10_p90_width_mm": None,
-        "p2_p98_over_p10_p90_ratio": None,
-        "p2_p98_minus_p10_p90_mm": None,
-        "largest_component_ratio": None,
-        "initial_mask_reliability": None,
-        "A_after_width_plausible": False,
-    }
-    if not enabled:
-        return info
-    cinfo = candidate_info or {}
-    if not bool(cinfo.get("used", False)):
-        info.update({
-            "evaluated": True,
-            "reason": f"{stage} candidate was not used by baseline guard; no extra rejection needed",
-            "already_rejected_by_baseline": bool(cinfo.get("guard_reverted", False)),
-        })
-        return info
-
-    before = _residual_policy_width_snapshot(
-        before_mask01, before_depth_masked, intr, depth_scale, refine_info, column_info
-    )
-    cand = _residual_policy_width_snapshot(
-        candidate_mask01, candidate_depth_masked, intr, depth_scale, refine_info, column_info
-    )
-
-    before_p2 = _width_mm_from_candidates(before.get("axis_width_candidates"), "p2_p98")
-    cand_p2 = _width_mm_from_candidates(cand.get("axis_width_candidates"), "p2_p98")
-    before_p5 = _width_mm_from_candidates(before.get("axis_width_candidates"), "p5_p95")
-    cand_p5 = _width_mm_from_candidates(cand.get("axis_width_candidates"), "p5_p95")
-    before_p10 = _width_mm_from_candidates(before.get("axis_width_candidates"), "p10_p90")
-    cand_p10 = _width_mm_from_candidates(cand.get("axis_width_candidates"), "p10_p90")
-    keep_ratio = _float_or_none(cinfo.get("valid_keep_ratio"))
-    if keep_ratio is None:
-        keep_ratio = _float_or_none(cinfo.get("keep_ratio"))
-    cand_largest_ratio = _float_or_none((cand.get("mask") or {}).get("largest_component_ratio"))
-
-    reject_reasons = []
-    for label, before_w, cand_w in (
-        ("p2p98", before_p2, cand_p2),
-        ("p5p95", before_p5, cand_p5),
-        ("p10p90", before_p10, cand_p10),
-    ):
-        if before_w is not None and cand_w is not None and cand_w < before_w * 0.85:
-            reject_reasons.append(f"{label}_width_shrink_ratio={cand_w / max(before_w, 1e-6):.3f}")
-    if keep_ratio is not None and keep_ratio < 0.70:
-        reject_reasons.append(f"candidate_valid_keep_ratio={keep_ratio:.3f}<0.70")
-
-    tuned_keep_reasons = []
-    tuned_reject_reasons = []
-    tuned_kept = False
-    cand_diff = None
-    cand_ratio = None
-    if cand_p2 is not None and cand_p10 is not None:
-        cand_diff = float(cand_p2 - cand_p10)
-        cand_ratio = float(cand_p2 / max(cand_p10, 1e-6))
-
-    if str(policy_A_variant) in {"a_tuned", "a_tuned_v2"} and reject_reasons:
-        if str(stage) != "post_ransac_a95":
-            tuned_reject_reasons.append("tuned_guard_only_applies_to_post_ransac_a95")
-        if cand_p2 is None or cand_p10 is None:
-            tuned_reject_reasons.append("candidate_width_unavailable")
-        else:
-            if not (15.0 <= cand_p2 <= 18.2):
-                tuned_reject_reasons.append(f"candidate_p2p98_not_in_plausible_band={cand_p2:.3f}mm")
-            else:
-                tuned_keep_reasons.append(f"candidate_p2p98_plausible={cand_p2:.3f}mm")
-            if cand_p10 < 10.0:
-                tuned_reject_reasons.append(f"candidate_p10p90_too_small={cand_p10:.3f}mm")
-            else:
-                tuned_keep_reasons.append(f"candidate_p10p90_plausible={cand_p10:.3f}mm")
-            if cand_diff is not None:
-                if cand_diff > 3.8:
-                    tuned_reject_reasons.append(f"candidate_width_sensitivity_diff_too_large={cand_diff:.3f}mm")
-                else:
-                    tuned_keep_reasons.append(f"candidate_width_sensitivity_diff_ok={cand_diff:.3f}mm")
-            if cand_ratio is not None:
-                if cand_ratio > 1.32:
-                    tuned_reject_reasons.append(f"candidate_width_sensitivity_ratio_too_large={cand_ratio:.3f}")
-                else:
-                    tuned_keep_reasons.append(f"candidate_width_sensitivity_ratio_ok={cand_ratio:.3f}")
-        if keep_ratio is None:
-            tuned_reject_reasons.append("candidate_keep_ratio_unavailable")
-        elif keep_ratio < 0.80:
-            tuned_reject_reasons.append(f"candidate_keep_ratio_too_low_for_tuned_keep={keep_ratio:.3f}")
-        else:
-            tuned_keep_reasons.append(f"candidate_keep_ratio_ok={keep_ratio:.3f}")
-        if cand_largest_ratio is None:
-            tuned_reject_reasons.append("candidate_largest_component_ratio_unavailable")
-        elif cand_largest_ratio < 0.98:
-            tuned_reject_reasons.append(f"candidate_largest_component_ratio_too_low={cand_largest_ratio:.3f}")
-        else:
-            tuned_keep_reasons.append(f"candidate_largest_component_ratio_ok={cand_largest_ratio:.3f}")
-
-        if not tuned_reject_reasons:
-            tuned_kept = True
-            reject_reasons = []
-
-    info.update({
-        "evaluated": True,
-        "reason": (
-            "candidate kept by tuned residual Policy A guard"
-            if tuned_kept
-            else ("overprune detected; candidate rejected" if reject_reasons else "candidate accepted by residual Policy A dry-run guard")
-        ),
-        "before_width_p2p98_mm": before_p2,
-        "candidate_width_p2p98_mm": cand_p2,
-        "before_width_p5p95_mm": before_p5,
-        "candidate_width_p5p95_mm": cand_p5,
-        "before_width_p10p90_mm": before_p10,
-        "candidate_width_p10p90_mm": cand_p10,
-        "candidate_valid_keep_ratio": keep_ratio,
-        "before_width_snapshot": before,
-        "candidate_width_snapshot": cand,
-        "overprune_detected": bool(reject_reasons),
-        "reject_candidate": bool(reject_reasons),
-        "reject_reasons": reject_reasons,
-        "tuned_keep_reasons": tuned_keep_reasons,
-        "tuned_reject_reasons": tuned_reject_reasons,
-        "policy_A_variant": str(policy_A_variant),
-        "policy_A_triggered": bool(reject_reasons),
-        "policy_A_candidate_rejected": bool(reject_reasons),
-        "policy_A_candidate_kept_by_tuned_guard": bool(tuned_kept),
-        "policy_A_candidate_kept_by_tuned_v2_guard": bool(tuned_kept and str(policy_A_variant) == "a_tuned_v2"),
-        "policy_A_reject_reason": "; ".join(reject_reasons) if reject_reasons else None,
-        "policy_A_keep_reason": "; ".join(tuned_keep_reasons) if tuned_kept else None,
-        "candidate_width_mm": cand_p2,
-        "pre_a95_width_mm": before_p2 if str(stage) == "post_ransac_a95" else None,
-        "post_a95_width_mm": cand_p2 if str(stage) == "post_ransac_a95" else None,
-        "p2_p98_width_mm": cand_p2,
-        "p10_p90_width_mm": cand_p10,
-        "p2_p98_over_p10_p90_ratio": cand_ratio,
-        "p2_p98_minus_p10_p90_mm": cand_diff,
-        "largest_component_ratio": cand_largest_ratio,
-        "initial_mask_reliability": "not_unreliable_by_candidate_component_guard",
-        "A_after_width_plausible": bool(tuned_kept),
-    })
-    return _jsonable_for_residual_diagnostics(info)
-
-
-def _evaluate_residual_policy_ab_safe_interaction(
-    *,
-    residual_policy_mode: str,
-    residual_policy_A_info: dict | None,
-    current_width_m: float | None,
-    initial_mask_quality: dict | None,
-):
-    """
-    AB_SAFE 専用の相互作用ガードを評価する．
-
-    A が post-RANSAC 等の候補を過削りとしてrejectし，A後の幅がすでに
-    plausibileなら，Bのrobust幅置換で上書きしない．GTやcase番号は使わない．
-    """
-    mode = str(residual_policy_mode).upper()
-    ainfo = residual_policy_A_info or {}
-    current_width_mm = None if current_width_m is None else float(current_width_m) * 1000.0
-    out = {
-        "mode": mode,
-        "enabled": mode in {"AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"},
-        "A_then_B_overwrite_prevented": False,
-        "A_after_width_plausible": False,
-        "A_after_width_sensitivity": None,
-        "A_triggered": bool(ainfo.get("reject_candidate", False)),
-        "current_width_mm": current_width_mm,
-        "notes": [],
-        "skip_policy_B": False,
-        "skip_reason": None,
-        "plausibility_reject_reasons": [],
-    }
-    if mode not in {"AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"}:
-        out["notes"].append("not AB_SAFE mode")
-        return _jsonable_for_residual_diagnostics(out)
-
-    if not bool(ainfo.get("reject_candidate", False)):
-        out["notes"].append("Policy A did not reject a candidate; allow Policy B evaluation")
-        return _jsonable_for_residual_diagnostics(out)
-
-    p2 = _float_or_none(ainfo.get("before_width_p2p98_mm"))
-    p10 = _float_or_none(ainfo.get("before_width_p10p90_mm"))
-    before_snap = ainfo.get("before_width_snapshot") if isinstance(ainfo, dict) else None
-    largest_ratio = None
-    valid_depth_count = None
-    if isinstance(before_snap, dict):
-        largest_ratio = _float_or_none((before_snap.get("mask") or {}).get("largest_component_ratio"))
-        valid_depth_count = _float_or_none(before_snap.get("valid_depth_pixel_count"))
-
-    imq = initial_mask_quality or {}
-    initial_unreliable = bool(imq.get("initial_mask_unreliable", False))
-    reject_reasons = []
-    sensitivity = {
-        "p2p98_width_mm": p2,
-        "p10p90_width_mm": p10,
-        "p2_minus_p10_mm": None,
-        "p2_over_p10": None,
-        "largest_component_ratio": largest_ratio,
-        "valid_depth_count": valid_depth_count,
-        "initial_mask_unreliable": initial_unreliable,
-    }
-
-    if p2 is None or p10 is None:
-        reject_reasons.append("A_after_width_candidates_unavailable")
-    else:
-        diff = float(p2 - p10)
-        ratio = float(p2 / max(p10, 1e-6))
-        sensitivity["p2_minus_p10_mm"] = diff
-        sensitivity["p2_over_p10"] = ratio
-        if not (12.0 <= p2 <= 35.0):
-            reject_reasons.append(f"A_after_p2p98_width_out_of_plausible_range={p2:.3f}mm")
-        if p10 < 10.0:
-            reject_reasons.append(f"A_after_p10p90_too_small={p10:.3f}mm")
-        if diff > 3.8:
-            reject_reasons.append(f"A_after_width_sensitivity_diff_too_large={diff:.3f}mm")
-        if ratio > 1.28:
-            reject_reasons.append(f"A_after_width_sensitivity_ratio_too_large={ratio:.3f}")
-
-    if largest_ratio is None or largest_ratio < 0.98:
-        reject_reasons.append(f"A_after_largest_component_ratio_too_low={largest_ratio}")
-    if initial_unreliable:
-        reject_reasons.append("initial_mask_quality_unreliable")
-
-    plausible = not reject_reasons
-    out.update({
-        "A_after_width_plausible": bool(plausible),
-        "A_after_width_sensitivity": sensitivity,
-        "plausibility_reject_reasons": reject_reasons,
-    })
-    if plausible:
-        out.update({
-            "A_then_B_overwrite_prevented": True,
-            "skip_policy_B": True,
-            "skip_reason": "Policy A rejected an over-prune candidate and A-after width is plausible; skip Policy B to avoid overwriting A result",
-        })
-        out["notes"].append("Policy B skipped by AB_SAFE interaction guard")
-    else:
-        out["notes"].append("A fired, but A-after width still looks sensitive or unreliable; allow Policy B evaluation")
-
-    return _jsonable_for_residual_diagnostics(out)
-
-
-def _evaluate_residual_policy_b_width(
-    *,
-    enabled: bool,
-    current_width_m: float | None,
-    mask01: np.ndarray,
-    depth_masked: np.ndarray,
-    intr,
-    depth_scale: float,
-    refine_info: dict | None,
-    column_info: dict | None,
-    initial_mask_quality: dict | None,
-    clean_rectangle_override_adopted: bool,
-    residual_policy_mode: str = "baseline",
-    residual_policy_interaction: dict | None = None,
-):
-    current_width_mm = None if current_width_m is None else float(current_width_m) * 1000.0
-    out = {
-        "enabled": bool(enabled),
-        "evaluated": False,
-        "robust_width_candidate": None,
-        "current_width_mm": current_width_mm,
-        "p2p98_width_mm": None,
-        "p5p95_width_mm": None,
-        "p10p90_width_mm": None,
-        "largest_component_p5p95_width_mm": None,
-        "largest_component_p10p90_width_mm": None,
-        "selected_robust_width_mm": None,
-        "robust_width_adopted": False,
-        "triggered": False,
-        "skipped_due_to_A_plausible": False,
-        "skip_reason": None,
-        "residual_policy_interaction": residual_policy_interaction,
-        "adopt_reasons": [],
-        "reject_reasons": ["disabled"] if not enabled else [],
-        "policy_B_candidate_kept_by_tuned_v2_guard": False,
-        "tuned_v2_keep_reasons": [],
-        "tuned_v2_reject_reasons": [],
-        "v3_enabled": False,
-        "v3_based_on": None,
-        "v3_small_width_guard_candidate": False,
-        "v3_small_width_guard_used": False,
-        "v3_small_width_guard_blocked": False,
-        "v3_small_width_guard_block_reason": None,
-        "v3_small_width_guard_block_reasons": [],
-        "v3_small_width_guard_proposal": None,
-        "v3_current_width_mm": None,
-        "v3_robust_width_mm": None,
-        "v3_current_minus_robust_mm": None,
-        "v3_current_over_robust_ratio": None,
-        "v3_p2p98_width_mm": None,
-        "v3_p10p90_width_mm": None,
-        "v3_p2p98_minus_p10p90_mm": None,
-        "v3_p2p98_over_p10p90_ratio": None,
-        "v3_largest_component_ratio": None,
-        "v3_keep_ratio": None,
-        "v3_valid_keep_ratio": None,
-    }
-    if not enabled:
-        return out, current_width_m
-    interaction = residual_policy_interaction or {}
-    if bool(interaction.get("skip_policy_B", False)):
-        out.update({
-            "evaluated": False,
-            "skipped_due_to_A_plausible": True,
-            "skip_reason": interaction.get("skip_reason"),
-            "reject_reasons": ["skipped_due_to_A_plausible"],
-            "reason": "Policy B skipped by AB_SAFE interaction guard",
-        })
-        return _jsonable_for_residual_diagnostics(out), current_width_m
-
-    snap = _residual_policy_width_snapshot(
-        mask01, depth_masked, intr, depth_scale, refine_info, column_info
-    )
-    axis_c = snap.get("axis_width_candidates") or {}
-    largest_c = snap.get("largest_component_axis_width_candidates") or {}
-    p2 = _width_mm_from_candidates(axis_c, "p2_p98")
-    p5 = _width_mm_from_candidates(axis_c, "p5_p95")
-    p10 = _width_mm_from_candidates(axis_c, "p10_p90")
-    lc_p5 = _width_mm_from_candidates(largest_c, "p5_p95")
-    lc_p10 = _width_mm_from_candidates(largest_c, "p10_p90")
-    largest_ratio = _float_or_none((snap.get("mask") or {}).get("largest_component_ratio"))
-
-    out.update({
-        "evaluated": True,
-        "p2p98_width_mm": p2,
-        "p5p95_width_mm": p5,
-        "p10p90_width_mm": p10,
-        "largest_component_p5p95_width_mm": lc_p5,
-        "largest_component_p10p90_width_mm": lc_p10,
-        "width_snapshot": snap,
-        "clean_rectangle_override_adopted": bool(clean_rectangle_override_adopted),
-        "largest_component_ratio": largest_ratio,
-    })
-
-    reject_reasons = []
-    adopt_reasons = []
-    imq = initial_mask_quality or {}
-    if bool(imq.get("initial_mask_unreliable", False)):
-        reject_reasons.append("initial_mask_quality_unreliable")
-    else:
-        adopt_reasons.append("initial_mask_quality_reliable")
-
-    if largest_ratio is None or largest_ratio < 0.98:
-        reject_reasons.append(f"largest_component_ratio_too_low={largest_ratio}")
-    else:
-        adopt_reasons.append(f"largest_component_ratio_ok={largest_ratio:.3f}")
-
-    if p2 is None or p10 is None or current_width_mm is None:
-        reject_reasons.append("required_width_candidates_unavailable")
-    else:
-        diff = float(p2 - p10)
-        ratio = float(p2 / max(p10, 1e-6))
-        out["p2_minus_p10_mm"] = diff
-        out["p2_over_p10"] = ratio
-        if bool(clean_rectangle_override_adopted):
-            sensitivity_ok = current_width_mm >= 18.0 and diff >= 2.2 and ratio >= 1.14
-            sensitivity_rule = "clean_rectangle_override_current_ge_18_and_diff_ge_2p2_ratio_ge_1p14"
-        else:
-            sensitivity_ok = current_width_mm <= 18.5 and diff >= 3.2 and ratio >= 1.23
-            sensitivity_rule = "normal_current_le_18p5_and_diff_ge_3p2_ratio_ge_1p23"
-
-        out["sensitivity_rule"] = sensitivity_rule
-        if sensitivity_ok:
-            adopt_reasons.append(f"p2_p10_sensitivity={diff:.3f}mm ratio={ratio:.3f} rule={sensitivity_rule}")
-        else:
-            reject_reasons.append(f"p2_p10_sensitivity_rule_failed={diff:.3f}mm ratio={ratio:.3f} rule={sensitivity_rule}")
-
-        min_robust_width = 10.0 if bool(clean_rectangle_override_adopted) else 12.5
-        if p10 < min_robust_width:
-            reject_reasons.append(f"p10p90_too_small={p10:.3f}mm<min={min_robust_width:.3f}mm")
-        else:
-            adopt_reasons.append(f"p10p90_plausible={p10:.3f}mm")
-
-    robust_candidate_name = "p10_p90"
-    robust_width_mm = p10
-    if lc_p10 is not None and p10 is not None and abs(lc_p10 - p10) <= 0.25:
-        robust_candidate_name = "largest_component_p10_p90"
-        robust_width_mm = lc_p10
-
-    if robust_width_mm is None:
-        reject_reasons.append("robust_width_candidate_unavailable")
-    elif current_width_mm is not None and robust_width_mm >= current_width_mm:
-        reject_reasons.append("robust_width_not_smaller_than_current")
-
-    mode = str(residual_policy_mode).upper()
-    tuned_v2_keep_reasons = []
-    tuned_v2_reject_reasons = []
-    tuned_v2_kept = False
-    if mode in {"AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"} and reject_reasons and robust_width_mm is not None:
-        a_triggered = bool((residual_policy_interaction or {}).get("A_triggered", False))
-        robust_delta = None if current_width_mm is None else float(current_width_mm - robust_width_mm)
-        if a_triggered:
-            tuned_v2_reject_reasons.append("policy_A_already_triggered_or_skipped_B")
-        else:
-            tuned_v2_keep_reasons.append("policy_A_did_not_trigger")
-        if current_width_mm is None:
-            tuned_v2_reject_reasons.append("current_width_unavailable")
-        elif current_width_mm > 13.5:
-            tuned_v2_reject_reasons.append(f"current_width_too_large_for_small_width_v2={current_width_mm:.3f}mm")
-        else:
-            tuned_v2_keep_reasons.append(f"current_width_small_band={current_width_mm:.3f}mm")
-        if robust_width_mm < 10.0:
-            tuned_v2_reject_reasons.append(f"robust_width_too_small_for_v2={robust_width_mm:.3f}mm")
-        else:
-            tuned_v2_keep_reasons.append(f"robust_width_plausible_for_v2={robust_width_mm:.3f}mm")
-        if robust_delta is None:
-            tuned_v2_reject_reasons.append("robust_delta_unavailable")
-        elif not (1.5 <= robust_delta <= 3.0):
-            tuned_v2_reject_reasons.append(f"robust_delta_not_in_small_width_v2_band={robust_delta:.3f}mm")
-        else:
-            tuned_v2_keep_reasons.append(f"robust_delta_small_width_v2_ok={robust_delta:.3f}mm")
-        if p2 is None or p10 is None:
-            tuned_v2_reject_reasons.append("p2_or_p10_unavailable")
-        else:
-            diff = float(p2 - p10)
-            ratio = float(p2 / max(p10, 1e-6))
-            if diff > 2.65:
-                tuned_v2_reject_reasons.append(f"small_width_v2_sensitivity_diff_too_large={diff:.3f}mm")
-            else:
-                tuned_v2_keep_reasons.append(f"small_width_v2_sensitivity_diff_ok={diff:.3f}mm")
-            if ratio > 1.245:
-                tuned_v2_reject_reasons.append(f"small_width_v2_sensitivity_ratio_too_large={ratio:.3f}")
-            else:
-                tuned_v2_keep_reasons.append(f"small_width_v2_sensitivity_ratio_ok={ratio:.3f}")
-        if largest_ratio is None:
-            tuned_v2_reject_reasons.append("largest_component_ratio_unavailable")
-        elif largest_ratio < 0.98:
-            tuned_v2_reject_reasons.append(f"largest_component_ratio_too_low_for_v2={largest_ratio:.3f}")
-        else:
-            tuned_v2_keep_reasons.append(f"largest_component_ratio_ok_for_v2={largest_ratio:.3f}")
-        if bool(imq.get("initial_mask_unreliable", False)):
-            tuned_v2_reject_reasons.append("initial_mask_quality_unreliable_for_v2")
-        else:
-            tuned_v2_keep_reasons.append("initial_mask_quality_reliable_for_v2")
-
-        blocking_reasons = [
-            r for r in tuned_v2_reject_reasons
-            if not (
-                r.startswith("p2_p10_sensitivity_rule_failed=")
-                or r.startswith("p10p90_too_small=")
-            )
-        ]
-        if not blocking_reasons:
-            tuned_v2_kept = True
-            reject_reasons = []
-
-    v3_block_reasons = []
-    v3_blocked = False
-    v3_enabled = mode == "AB_SAFE_A_TUNED_V3"
-    if v3_enabled:
-        out["v3_enabled"] = True
-        out["v3_based_on"] = "AB_SAFE_A_TUNED_V2"
-        out["v3_small_width_guard_proposal"] = "Proposal_C_block_non_improving_validation_band"
-        out["v3_small_width_guard_candidate"] = bool(tuned_v2_kept)
-        out["v3_current_width_mm"] = current_width_mm
-        out["v3_robust_width_mm"] = robust_width_mm
-        out["v3_current_minus_robust_mm"] = None if current_width_mm is None or robust_width_mm is None else float(current_width_mm - robust_width_mm)
-        out["v3_current_over_robust_ratio"] = None if current_width_mm is None or robust_width_mm in (None, 0) else float(current_width_mm / robust_width_mm)
-        out["v3_p2p98_width_mm"] = p2
-        out["v3_p10p90_width_mm"] = p10
-        out["v3_p2p98_minus_p10p90_mm"] = None if p2 is None or p10 is None else float(p2 - p10)
-        out["v3_p2p98_over_p10p90_ratio"] = None if p2 is None or p10 in (None, 0) else float(p2 / p10)
-        out["v3_largest_component_ratio"] = largest_ratio
-        out["v3_keep_ratio"] = None
-        out["v3_valid_keep_ratio"] = None
-
-        if tuned_v2_kept:
-            ratio = out["v3_p2p98_over_p10p90_ratio"]
-            # Proposal C from the V2 small-width guard audit:
-            # block over-shrink-prone bands without using case id, book name, or GT.
-            if current_width_mm is not None and robust_width_mm is not None:
-                if current_width_mm < 13.0 and robust_width_mm < 10.55:
-                    v3_block_reasons.append(
-                        f"proposal_c_low_current_low_robust=current={current_width_mm:.3f}mm robust={robust_width_mm:.3f}mm"
-                    )
-            else:
-                v3_block_reasons.append("proposal_c_current_or_robust_width_unavailable")
-
-            if current_width_mm is not None and ratio is not None:
-                if 13.10 <= current_width_mm <= 13.25 and ratio < 1.21:
-                    v3_block_reasons.append(
-                        f"proposal_c_mid_current_low_ratio=current={current_width_mm:.3f}mm ratio={ratio:.3f}"
-                    )
-                if current_width_mm >= 13.4 and ratio > 1.232:
-                    v3_block_reasons.append(
-                        f"proposal_c_high_current_high_ratio=current={current_width_mm:.3f}mm ratio={ratio:.3f}"
-                    )
-            elif current_width_mm is None or ratio is None:
-                v3_block_reasons.append("proposal_c_current_or_ratio_unavailable")
-
-            if v3_block_reasons:
-                v3_blocked = True
-                tuned_v2_kept = False
-                reject_reasons = list(tuned_v2_reject_reasons) + v3_block_reasons
-                if not reject_reasons:
-                    reject_reasons = v3_block_reasons
-
-        out["v3_small_width_guard_blocked"] = bool(v3_blocked)
-        out["v3_small_width_guard_block_reasons"] = v3_block_reasons
-        out["v3_small_width_guard_block_reason"] = "; ".join(v3_block_reasons) if v3_block_reasons else None
-        out["v3_small_width_guard_used"] = bool(tuned_v2_kept)
-
-    out["robust_width_candidate"] = robust_candidate_name
-    out["selected_robust_width_mm"] = robust_width_mm
-    out["policy_B_candidate_kept_by_tuned_v2_guard"] = bool(tuned_v2_kept)
-    out["tuned_v2_keep_reasons"] = tuned_v2_keep_reasons
-    out["tuned_v2_reject_reasons"] = tuned_v2_reject_reasons
-    out["adopt_reasons"] = adopt_reasons
-    out["reject_reasons"] = reject_reasons
-    if not reject_reasons and robust_width_mm is not None:
-        out["robust_width_adopted"] = True
-        out["triggered"] = True
-        out["reason"] = (
-            "robust width adopted by AB_SAFE_A_TUNED_V3 small-width stability guard"
-            if v3_enabled and tuned_v2_kept
-            else
-            "robust width adopted by AB_SAFE_A_TUNED_V2 small-width stability guard"
-            if tuned_v2_kept
-            else "robust width adopted in residual policy experiment mode"
-        )
-        return _jsonable_for_residual_diagnostics(out), float(robust_width_mm) / 1000.0
-
-    out["reason"] = "robust width rejected in residual policy experiment mode"
-    return _jsonable_for_residual_diagnostics(out), current_width_m
-
-
-def _summarize_residual_guard_info(column_info: dict | None):
-    cinfo = column_info or {}
-    ransac = cinfo.get("ransac_spine_plane") if isinstance(cinfo, dict) else None
-    post_a95 = cinfo.get("post_ransac_plane_a95_column_prune") if isinstance(cinfo, dict) else None
-    one_sided = cinfo.get("one_sided_post_final_column_prune") if isinstance(cinfo, dict) else None
-    final_clip = cinfo.get("final_t_width_clip") if isinstance(cinfo, dict) else None
-    return _jsonable_for_residual_diagnostics({
-        "ransac_spine_plane": None if not isinstance(ransac, dict) else {
-            "used": ransac.get("used"),
-            "guard_reverted": ransac.get("guard_reverted"),
-            "reason": ransac.get("reason"),
-            "ransac_guard_reasons": ransac.get("ransac_guard_reasons"),
-            "valid_count_before": ransac.get("valid_count_before"),
-            "valid_count_after": ransac.get("valid_count_after"),
-            "candidate_valid_count_after": ransac.get("candidate_valid_count_after"),
-            "keep_ratio": ransac.get("keep_ratio"),
-            "candidate_keep_ratio": ransac.get("candidate_keep_ratio"),
-            "removed_ratio": ransac.get("removed_ratio"),
-            "candidate_removed_ratio": ransac.get("candidate_removed_ratio"),
-            "distance_m_p90": ransac.get("distance_m_p90"),
-            "distance_m_p95": ransac.get("distance_m_p95"),
-            "reference_point_ratio": ransac.get("reference_point_ratio"),
-        },
-        "post_ransac_plane_a95": None if not isinstance(post_a95, dict) else {
-            "used": post_a95.get("used"),
-            "guard_reverted": post_a95.get("guard_reverted"),
-            "reason": post_a95.get("reason"),
-            "valid_count_before": post_a95.get("valid_count_before"),
-            "valid_count_after": post_a95.get("valid_count_after"),
-            "candidate_valid_count_after": post_a95.get("candidate_valid_count_after"),
-            "valid_keep_ratio": post_a95.get("valid_keep_ratio"),
-            "candidate_valid_keep_ratio": post_a95.get("candidate_valid_keep_ratio"),
-            "removed_ratio": post_a95.get("removed_ratio"),
-            "candidate_removed_ratio": post_a95.get("candidate_removed_ratio"),
-            "max_length_m": post_a95.get("max_length_m"),
-            "length_threshold_m": post_a95.get("length_threshold_m"),
-            "one_sided_previous_side_filter": post_a95.get("one_sided_previous_side_filter"),
-        },
-        "post_column_prune": None if not isinstance(one_sided, dict) else {
-            "used": one_sided.get("used"),
-            "guard_reverted": one_sided.get("guard_reverted"),
-            "reason": one_sided.get("reason"),
-            "remove_side": one_sided.get("remove_side"),
-            "protected_side": one_sided.get("protected_side"),
-            "valid_count_before": one_sided.get("valid_count_before"),
-            "valid_count_after": one_sided.get("valid_count_after"),
-            "valid_keep_ratio": one_sided.get("valid_keep_ratio"),
-            "removed_count": one_sided.get("removed_count"),
-            "removed_ratio": one_sided.get("removed_ratio"),
-        },
-        "final_t_width_clip": None if not isinstance(final_clip, dict) else {
-            "used": final_clip.get("used"),
-            "reason": final_clip.get("reason"),
-            "area_before": final_clip.get("area_before"),
-            "area_after": final_clip.get("area_after"),
-            "keep_ratio": final_clip.get("keep_ratio"),
-            "width_px": final_clip.get("width_px"),
-            "half_width_px": final_clip.get("half_width_px"),
-        },
-    })
-
-
-def save_residual_stage_diagnostics_debug(
-    shot_dir: Path,
-    stem: str,
-    stage_diagnostics: list[dict],
-    stage_diffs: list[dict],
-    guard_diagnostics: dict | None = None,
-    final_width_info: dict | None = None,
-):
-    debug_dir = Path(shot_dir) / "debug_residual_stage_diagnostics"
-    debug_dir.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "stage_diagnostics": stage_diagnostics,
-        "stage_diffs": stage_diffs,
-        "guard_diagnostics": guard_diagnostics or {},
-        "final_width_info": final_width_info or {},
-    }
-    save_json(debug_dir / f"{stem}_stage_width_diagnostics.json", payload)
-
-    table_path = debug_dir / f"{stem}_stage_width_table.csv"
-    fields = [
-        "stage_name",
-        "mask_area_px",
-        "valid_depth_pixel_count",
-        "component_count",
-        "largest_component_ratio",
-        "axis_source",
-        "axis_p2_p98_width_mm",
-        "axis_p5_p95_width_mm",
-        "axis_p10_p90_width_mm",
-        "axis_p25_p75_width_mm",
-        "pca_width_mm",
-        "adopted_width_shadow_mm_if_stage_final",
-        "width_sensitivity_p2p98_minus_p10p90_mm",
-        "depth_median_m",
-    ]
-    with table_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
-        writer.writeheader()
-        for diag in stage_diagnostics:
-            widths = diag.get("axis_width_candidates") or {}
-            mask_info = diag.get("mask") or {}
-            writer.writerow({
-                "stage_name": diag.get("stage_name"),
-                "mask_area_px": mask_info.get("area_px"),
-                "valid_depth_pixel_count": diag.get("valid_depth_pixel_count"),
-                "component_count": mask_info.get("component_count"),
-                "largest_component_ratio": mask_info.get("largest_component_ratio"),
-                "axis_source": diag.get("axis_source"),
-                "axis_p2_p98_width_mm": (widths.get("p2_p98") or {}).get("width_mm"),
-                "axis_p5_p95_width_mm": (widths.get("p5_p95") or {}).get("width_mm"),
-                "axis_p10_p90_width_mm": (widths.get("p10_p90") or {}).get("width_mm"),
-                "axis_p25_p75_width_mm": (widths.get("p25_p75") or {}).get("width_mm"),
-                "pca_width_mm": diag.get("pca_width_mm"),
-                "adopted_width_shadow_mm_if_stage_final": diag.get("adopted_width_shadow_mm_if_stage_final"),
-                "width_sensitivity_p2p98_minus_p10p90_mm": diag.get("width_sensitivity_p2p98_minus_p10p90_mm"),
-                "depth_median_m": (diag.get("depth_stats") or {}).get("median_m"),
-            })
-    return {"debug_dir": str(debug_dir), "json": str(debug_dir / f"{stem}_stage_width_diagnostics.json"), "csv": str(table_path)}
-
-
 def _run_recognition_core_like_offline(
     *,
     query: str,
@@ -8198,7 +6399,7 @@ def _run_recognition_core_like_offline(
     use_persistent_runtime: bool = True,
     sam_pts_side: tuple[int, int] = (32, 8),
     sam_decoder_k_keep: int = 1,
-    sam_target_len: int = 1024,
+    sam_target_len: int = 768,
     depth_merge_tolerance_raw: int = 30,
     show_pointcloud_gui: bool = False,
     save_pointcloud_debug: bool = False,
@@ -8295,55 +6496,6 @@ def _run_recognition_core_like_offline(
     )
     sel_idx = int(merged["sel_idx"])
     mask01 = (np.asarray(merged["mask01"]) > 0).astype(np.uint8)
-    residual_policy_mode = _get_residual_policy_mode()
-    residual_policy_A_info = {
-        "enabled": _residual_policy_has_a(residual_policy_mode),
-        "evaluated": False,
-        "overprune_detected": False,
-        "reject_candidate": False,
-        "reason": "not evaluated",
-    }
-    residual_policy_B_info = {
-        "enabled": _residual_policy_has_b(residual_policy_mode),
-        "evaluated": False,
-        "robust_width_adopted": False,
-        "triggered": False,
-        "skipped_due_to_A_plausible": False,
-        "reason": "not evaluated",
-    }
-    residual_policy_interaction_info = {
-        "mode": residual_policy_mode,
-        "enabled": residual_policy_mode in {"AB_SAFE", "AB_SAFE_A_TUNED", "AB_SAFE_A_TUNED_V2", "AB_SAFE_A_TUNED_V3"},
-        "A_then_B_overwrite_prevented": False,
-        "A_after_width_plausible": False,
-        "A_after_width_sensitivity": None,
-        "notes": ["not evaluated"],
-    }
-    residual_stage_diagnostics = []
-    residual_stage_diffs = []
-
-    def _record_residual_stage(stage_name, mask_stage, depth_stage, *, refine_stage=None, column_stage=None, extra_info=None):
-        try:
-            diag = build_stage_width_diagnostics(
-                stage_name=stage_name,
-                mask01=mask_stage,
-                depth_masked=depth_stage,
-                intr=intr,
-                depth_scale=depth_scale,
-                refine_info=refine_stage if refine_stage is not None else refine_info,
-                column_info=column_stage if column_stage is not None else column_info,
-                extra_info=extra_info,
-            )
-            if residual_stage_diagnostics:
-                diff = _stage_width_diff(residual_stage_diagnostics[-1], diag)
-                if diff is not None:
-                    residual_stage_diffs.append(diff)
-            residual_stage_diagnostics.append(diag)
-        except Exception as e:
-            residual_stage_diagnostics.append({
-                "stage_name": str(stage_name),
-                "diagnostic_error": str(e),
-            })
 
     # ===== 5) Depth中央値±3cm補正を長方形判定より先に実行 =====
     mask01_before_depth_filter = mask01.copy()
@@ -8395,11 +6547,6 @@ def _run_recognition_core_like_offline(
         selected_mask01=mask01_before_depth_filter,
         min_intersection_px=30,
     )
-    initial_mask_quality_info = build_initial_mask_quality(
-        mask01=mask01_before_depth_filter,
-        refine_info=depth_anchor_refine_info,
-        image_shape=color_np.shape[:2],
-    )
     if ocr_depth_reference_mask01 is not None:
         try:
             _save_points_and_overlay(
@@ -8431,14 +6578,6 @@ def _run_recognition_core_like_offline(
         mask01,
         depth_masked,
         note="選択マスク内のDepth中央値±3cmで外れ値除去した直後．",
-    )
-    _record_residual_stage(
-        "after_depth_prefilter",
-        mask01,
-        depth_masked,
-        refine_stage=depth_anchor_refine_info,
-        column_stage={},
-        extra_info={"stage_id": "01", "depth_filter_detail": depth_filter_detail_info},
     )
 
     # 原因解析用：Depth補正後に残った有効Depth点を色分け保存する．
@@ -8502,14 +6641,6 @@ def _run_recognition_core_like_offline(
         depth_masked,
         note="Depth補正後に，OCR軸中心帯だけ背表紙内部を補完した後．",
     )
-    _record_residual_stage(
-        "after_depth_prefilter_spine_completion",
-        mask01,
-        depth_masked,
-        refine_stage=depth_anchor_refine_info,
-        column_stage={},
-        extra_info={"stage_id": "02", "spine_completion": spine_completion_info},
-    )
 
     depth_prefilter_info = {
         "enabled": True,
@@ -8526,7 +6657,6 @@ def _run_recognition_core_like_offline(
         "selected_depth_points_after_prefilter": selected_depth_points_after_info,
         "spine_completion_after_depth_prefilter": spine_completion_info,
         "selected_depth_points_after_spine_completion": selected_depth_points_after_completion_info,
-        "initial_mask_quality": initial_mask_quality_info,
     }
     save_json(shot_dir / f"mask{sel_idx}{result_suffix}_depth_prefilter_log.json", depth_prefilter_info)
 
@@ -8574,29 +6704,6 @@ def _run_recognition_core_like_offline(
         "reason": "not run; column length refinement was skipped",
         "algorithm": "one_sided_short_column_prune_after_final",
     }
-
-    clean_rectangle_analysis_info = build_clean_rectangle_analysis(
-        mask01=mask01,
-        depth_masked=depth_masked,
-        shape_info=shape_info,
-        refine_info=depth_anchor_refine_info,
-        intr=intr,
-        depth_scale=depth_scale,
-        clean_rectangle_skip_used=not needs_shape_refine,
-    )
-    clean_rectangle_shadow_info = {
-        "evaluated": False,
-        "reason": "clean rectangle skip not used",
-        "shadow_candidate_not_adopted_reason": "shadow_only",
-    }
-    clean_rectangle_override_info = {
-        "evaluated": False,
-        "adopted": False,
-        "reason": "clean rectangle skip not used",
-        "reject_reasons": ["clean_rectangle_skip_not_used"],
-        "adopt_reasons": [],
-    }
-    clean_rectangle_override_adopted = False
 
     # ===== 7) 長方形でない場合だけOCR軸を取得する．ただしmask01は更新しない =====
     if needs_shape_refine:
@@ -8646,73 +6753,6 @@ def _run_recognition_core_like_offline(
         mask01 = mask01_before_refine.copy()
     else:
         print(f"[MASK SHAPE]{debug_prefix} depth-filtered mask is clean rotated rectangle -> skip OCR/column refinement")
-        clean_rectangle_shadow_info = evaluate_clean_rectangle_shadow_candidate(
-            shot_dir=shot_dir,
-            color_np=color_np,
-            mask01=mask01,
-            depth_masked=depth_masked,
-            merged=merged,
-            query=query,
-            refine_info_seed=depth_anchor_refine_info,
-            shape_info=shape_info,
-            intr=intr,
-            depth_scale=depth_scale,
-            result_suffix=result_suffix,
-            sel_idx=sel_idx,
-        )
-        shadow_mask_runtime = clean_rectangle_shadow_info.pop("_shadow_mask01", None)
-        shadow_depth_runtime = clean_rectangle_shadow_info.pop("_shadow_depth_masked", None)
-        shadow_column_runtime = clean_rectangle_shadow_info.pop("_shadow_column_info", None)
-        shadow_refine_runtime = clean_rectangle_shadow_info.pop("_shadow_refine_info", None)
-        clean_rectangle_override_info = decide_clean_rectangle_override(
-            clean_rectangle_shadow=clean_rectangle_shadow_info,
-            initial_mask_quality=initial_mask_quality_info,
-            clean_rectangle_analysis=clean_rectangle_analysis_info,
-        )
-        if clean_rectangle_override_info.get("adopted") and (
-            shadow_mask_runtime is None
-            or shadow_depth_runtime is None
-            or not isinstance(shadow_column_runtime, dict)
-            or not isinstance(shadow_refine_runtime, dict)
-        ):
-            clean_rectangle_override_info["adopted"] = False
-            clean_rectangle_override_info["reason"] = "candidate_rejected"
-            clean_rectangle_override_info.setdefault("reject_reasons", []).append("shadow_runtime_candidate_unavailable")
-
-        if bool(clean_rectangle_override_info.get("adopted", False)):
-            mask01 = (np.asarray(shadow_mask_runtime) > 0).astype(np.uint8)
-            depth_masked = _apply_mask_to_depth_no_save(shadow_depth_runtime, mask01)
-            refine_info = dict(shadow_refine_runtime)
-            refine_info["shape_rectangularity"] = shape_info
-            refine_info["depth_prefilter"] = depth_prefilter_info
-            refine_info["clean_rectangle_override_adopted"] = True
-            column_info = dict(shadow_column_runtime)
-            column_info["shape_rectangularity"] = shape_info
-            column_info["depth_prefilter"] = depth_prefilter_info
-            column_info["clean_rectangle_override_adopted"] = True
-            one_sided_column_prune_info = column_info.get("one_sided_post_final_column_prune", one_sided_column_prune_info)
-            clean_rectangle_override_adopted = True
-            clean_rectangle_shadow_info["shadow_candidate_adopted_as_final"] = True
-            clean_rectangle_shadow_info["shadow_candidate_not_adopted_reason"] = None
-            _save_step_projection(
-                "04b",
-                "clean_rectangle_shadow_candidate_adopted",
-                mask01,
-                depth_masked,
-                note="clean rectangle skip時のshadow candidateを安全条件で本流採用した後．",
-            )
-        else:
-            clean_rectangle_shadow_info["shadow_candidate_adopted_as_final"] = False
-            clean_rectangle_shadow_info["shadow_candidate_not_adopted_reason"] = "not_adopted_by_clean_rectangle_override_guard"
-
-        save_json(
-            Path(shot_dir) / "debug_clean_rectangle_shadow" / f"mask{sel_idx}{result_suffix}_clean_rectangle_shadow_log.json",
-            clean_rectangle_shadow_info,
-        )
-        save_json(
-            Path(shot_dir) / "debug_clean_rectangle_shadow" / f"mask{sel_idx}{result_suffix}_clean_rectangle_override_log.json",
-            clean_rectangle_override_info,
-        )
 
     merge_end = time.perf_counter()
     print(f"[TIME]{debug_prefix} merge OCR+SAM: {merge_end - merge_start:.3f} sec")
@@ -8907,14 +6947,6 @@ def _run_recognition_core_like_offline(
             depth_masked,
             note="自動スコアで選択された列長フィルタ後．",
         )
-        _record_residual_stage(
-            "after_column_refine",
-            mask01,
-            depth_masked,
-            refine_stage=refine_info,
-            column_stage=column_info,
-            extra_info={"stage_id": "07", "selected_refine_mode": selected_refine_mode},
-        )
 
         # ===== 8.5) 最終t方向幅クリップ =====
         # 列長フィルタでFalse側が選ばれた場合などに，背表紙方向には長いが
@@ -8964,14 +6996,6 @@ def _run_recognition_core_like_offline(
             depth_masked,
             note="final_t_width_clip適用後．used=falseの場合は前段と同じmaskになる．",
         )
-        _record_residual_stage(
-            "after_final_t_width_clip",
-            mask01,
-            depth_masked,
-            refine_stage=refine_info,
-            column_stage=column_info,
-            extra_info={"stage_id": "08", "final_t_width_clip": final_t_width_clip_info},
-        )
 
         # ===== 8.6) 前段で削った片側だけ，短い点群列を追加削除 =====
         # Depth精度不足で奥側側面が残る場合に備え，final_t_width_clip 等で
@@ -9000,36 +7024,6 @@ def _run_recognition_core_like_offline(
             require_shape_not_worse=False,
             return_info=True,
         )
-        residual_policy_A_post_column_info = _evaluate_residual_policy_a_candidate(
-            enabled=_residual_policy_has_a(residual_policy_mode),
-            policy_A_variant=_residual_policy_a_variant(residual_policy_mode),
-            stage="post_column",
-            before_mask01=mask01_before_one_sided_column_prune,
-            before_depth_masked=depth_masked_before_one_sided_column_prune,
-            candidate_mask01=mask01,
-            candidate_depth_masked=depth_masked,
-            candidate_info=one_sided_column_prune_info,
-            intr=intr,
-            depth_scale=depth_scale,
-            refine_info=refine_info,
-            column_info=column_info,
-        )
-        if bool(residual_policy_A_post_column_info.get("reject_candidate", False)):
-            mask01 = mask01_before_one_sided_column_prune.copy()
-            depth_masked = depth_masked_before_one_sided_column_prune.copy()
-            one_sided_column_prune_info = dict(one_sided_column_prune_info)
-            one_sided_column_prune_info.update({
-                "used": False,
-                "residual_policy_A_reverted": True,
-                "reason": "residual Policy A rejected post-column candidate: "
-                + "; ".join(residual_policy_A_post_column_info.get("reject_reasons", [])),
-                "valid_count_after": int(np.count_nonzero((mask01 > 0) & (depth_masked > 0))),
-                "valid_keep_ratio": 1.0,
-                "removed_count": 0,
-                "removed_ratio": 0.0,
-            })
-        if bool(residual_policy_A_post_column_info.get("evaluated", False)):
-            residual_policy_A_info = residual_policy_A_post_column_info
         column_info["one_sided_post_final_column_prune"] = one_sided_column_prune_info
         save_json(
             shot_dir / f"mask{sel_idx}{result_suffix}_one_sided_post_final_column_prune_log.json",
@@ -9051,14 +7045,6 @@ def _run_recognition_core_like_offline(
             mask01,
             depth_masked,
             note="前段で削った側だけに短列削除を追加した後．",
-        )
-        _record_residual_stage(
-            "after_post_column_side_front_prune",
-            mask01,
-            depth_masked,
-            refine_stage=refine_info,
-            column_stage=column_info,
-            extra_info={"stage_id": "09", "one_sided_post_final_column_prune": one_sided_column_prune_info},
         )
 
         save_spine_column_length_debug(
@@ -9093,14 +7079,6 @@ def _run_recognition_core_like_offline(
         )
     else:
         print(f"[MASK SHAPE]{debug_prefix} skip column length refinement because depth-filtered mask is rectangular")
-        _record_residual_stage(
-            "after_column_refine",
-            mask01,
-            depth_masked,
-            refine_stage=refine_info,
-            column_stage=column_info,
-            extra_info={"stage_id": "07", "skipped": True, "reason": column_info.get("reason")},
-        )
 
     depth_masked = _apply_mask_to_depth_no_save(depth_masked, mask01)
     _save_step_projection(
@@ -9194,14 +7172,6 @@ def _run_recognition_core_like_offline(
         depth_masked,
         note="OCR文字領域から推定したRANSAC平面で外れ点を除去した後．",
     )
-    _record_residual_stage(
-        "after_ransac_spine_plane",
-        mask01,
-        depth_masked,
-        refine_stage=refine_info_for_ransac,
-        column_stage=column_info,
-        extra_info={"stage_id": "11", "ransac_spine_plane": ransac_spine_plane_info},
-    )
 
     # ===== 9.5) RANSAC平面内座標でa方向95%列長フィルタ =====
     # 画像上ではなく，RANSAC平面へ射影した点群を(a,b)座標で見て，
@@ -9266,37 +7236,6 @@ def _run_recognition_core_like_offline(
             "note": "post-RANSAC a95 is allowed only when the plane comes from selected OCR text region RANSAC.",
         }
 
-    residual_policy_A_post_ransac_info = _evaluate_residual_policy_a_candidate(
-        enabled=_residual_policy_has_a(residual_policy_mode),
-        policy_A_variant=_residual_policy_a_variant(residual_policy_mode),
-        stage="post_ransac_a95",
-        before_mask01=mask01_before_post_ransac_plane_a95,
-        before_depth_masked=depth_masked_before_post_ransac_plane_a95,
-        candidate_mask01=mask01,
-        candidate_depth_masked=depth_masked,
-        candidate_info=post_ransac_plane_a95_info,
-        intr=intr,
-        depth_scale=depth_scale,
-        refine_info=refine_info_for_ransac,
-        column_info=column_info,
-    )
-    if bool(residual_policy_A_post_ransac_info.get("reject_candidate", False)):
-        mask01 = mask01_before_post_ransac_plane_a95.copy()
-        depth_masked = depth_masked_before_post_ransac_plane_a95.copy()
-        post_ransac_plane_a95_info = dict(post_ransac_plane_a95_info)
-        post_ransac_plane_a95_info.update({
-            "used": False,
-            "residual_policy_A_reverted": True,
-            "reason": "residual Policy A rejected post-RANSAC a95 candidate: "
-            + "; ".join(residual_policy_A_post_ransac_info.get("reject_reasons", [])),
-            "valid_count_after": int(np.count_nonzero((mask01 > 0) & (depth_masked > 0))),
-            "valid_keep_ratio": 1.0,
-            "removed_count": 0,
-            "removed_ratio": 0.0,
-        })
-    if bool(residual_policy_A_post_ransac_info.get("evaluated", False)):
-        residual_policy_A_info = residual_policy_A_post_ransac_info
-
     column_info["post_ransac_plane_a95_column_prune"] = post_ransac_plane_a95_info
     print(
         "[POST_RANSAC_PLANE_A95]"
@@ -9315,14 +7254,6 @@ def _run_recognition_core_like_offline(
         depth_masked,
         note="RANSAC平面上a方向95%列長フィルタ後．skipされた場合は前段と同じmaskになる．",
     )
-    _record_residual_stage(
-        "after_post_ransac_a95",
-        mask01,
-        depth_masked,
-        refine_stage=refine_info_for_ransac,
-        column_stage=column_info,
-        extra_info={"stage_id": "12", "post_ransac_plane_a95": post_ransac_plane_a95_info},
-    )
 
     # この時点の画像がユーザーの言う final.png．calculate_yaw 直前の最終入力である．
     final_reconstruction_info = save_final_png_and_reconstruction_bundle(
@@ -9340,14 +7271,6 @@ def _run_recognition_core_like_offline(
         mask01,
         depth_masked,
         note="calculate_yaw直前の最終mask/depth．final.pngと同じ段階．",
-    )
-    _record_residual_stage(
-        "final_before_calculate_yaw",
-        mask01,
-        depth_masked,
-        refine_stage=refine_info_for_ransac,
-        column_stage=column_info,
-        extra_info={"stage_id": "90", "final_reconstruction": final_reconstruction_info},
     )
 
     # ===== 10) 点群化 =====
@@ -9389,7 +7312,7 @@ def _run_recognition_core_like_offline(
     norm_xy = float(np.hypot(vx, vy))
     theta_rad = 0.0 if norm_xy < 1e-8 else float(np.arctan2(vy, vx))
 
-    if needs_shape_refine or clean_rectangle_override_adopted:
+    if needs_shape_refine:
         book_width, book_width_info = estimate_book_width_from_filtered_mask_axis(
             mask01=mask01,
             depth_masked=depth_masked,
@@ -9410,88 +7333,8 @@ def _run_recognition_core_like_offline(
             book_width_info["method"] = "estimate_book_width_3d_pca_rectangular_mask_no_refine"
             book_width_info["shape_rectangularity"] = shape_info
 
-    if isinstance(book_width_info, dict):
-        book_width_info["clean_rectangle_override_adopted"] = bool(clean_rectangle_override_adopted)
-        book_width_info["width_before_clean_rectangle_override_mm"] = clean_rectangle_override_info.get("original_width_mm")
-        book_width_info["width_after_clean_rectangle_override_mm"] = clean_rectangle_override_info.get("shadow_width_mm")
-        book_width_info["clean_rectangle_override"] = clean_rectangle_override_info
-
-    residual_policy_interaction_info = _evaluate_residual_policy_ab_safe_interaction(
-        residual_policy_mode=residual_policy_mode,
-        residual_policy_A_info=residual_policy_A_info,
-        current_width_m=book_width,
-        initial_mask_quality=initial_mask_quality_info,
-    )
-    residual_policy_B_info, book_width_after_policy_B = _evaluate_residual_policy_b_width(
-        enabled=_residual_policy_has_b(residual_policy_mode),
-        residual_policy_mode=residual_policy_mode,
-        residual_policy_interaction=residual_policy_interaction_info,
-        current_width_m=book_width,
-        mask01=mask01,
-        depth_masked=depth_masked,
-        intr=intr,
-        depth_scale=depth_scale,
-        refine_info=refine_info,
-        column_info=column_info,
-        initial_mask_quality=initial_mask_quality_info,
-        clean_rectangle_override_adopted=clean_rectangle_override_adopted,
-    )
-    if bool(residual_policy_B_info.get("robust_width_adopted", False)):
-        book_width = book_width_after_policy_B
-        if isinstance(book_width_info, dict):
-            book_width_info["residual_policy_B_original_width_mm"] = residual_policy_B_info.get("current_width_mm")
-            book_width_info["residual_policy_B_selected_width_mm"] = residual_policy_B_info.get("selected_robust_width_mm")
-            book_width_info["residual_policy_B_candidate"] = residual_policy_B_info.get("robust_width_candidate")
-            book_width_info["method"] = str(book_width_info.get("method", book_width_info.get("fallback_method", "unknown"))) + "_residual_policy_B_experiment"
-    if isinstance(book_width_info, dict):
-        book_width_info["residual_policy_mode"] = residual_policy_mode
-        book_width_info["residual_policy_A"] = residual_policy_A_info
-        book_width_info["residual_policy_B"] = residual_policy_B_info
-        book_width_info["residual_policy_interaction"] = residual_policy_interaction_info
-
-    try:
-        if book_width is not None:
-            clean_rectangle_analysis_info["pca_width_mm"] = float(book_width * 1000.0)
-        if isinstance(book_width_info, dict):
-            clean_rectangle_analysis_info["width_method_used"] = (
-                book_width_info.get("method")
-                or book_width_info.get("fallback_method")
-                or book_width_info.get("algorithm")
-            )
-            axis_width_info = book_width_info.get("axis_width_info")
-            if isinstance(axis_width_info, dict) and axis_width_info.get("width_mm") is not None:
-                clean_rectangle_analysis_info["axis_pixel_width_mm"] = float(axis_width_info.get("width_mm"))
-            elif book_width_info.get("width_mm") is not None and str(book_width_info.get("method", "")).startswith("filtered_mask_axis"):
-                clean_rectangle_analysis_info["axis_pixel_width_mm"] = float(book_width_info.get("width_mm"))
-    except Exception as e:
-        clean_rectangle_analysis_info["final_width_update_error"] = str(e)
-
     target_point_info = find_target_point(pts_f)
     target_point = target_point_info.get("target_m")
-
-    residual_guard_diagnostics = _summarize_residual_guard_info(column_info)
-    residual_final_width_info = {
-        "final_adopted_width_mm": None if book_width is None else float(book_width * 1000.0),
-        "book_width_info": book_width_info,
-        "shadow_width_candidates_from_final_stage": (
-            residual_stage_diagnostics[-1].get("axis_width_candidates")
-            if residual_stage_diagnostics and isinstance(residual_stage_diagnostics[-1], dict)
-            else None
-        ),
-        "largest_component_shadow_width_candidates_from_final_stage": (
-            residual_stage_diagnostics[-1].get("largest_component_axis_width_candidates")
-            if residual_stage_diagnostics and isinstance(residual_stage_diagnostics[-1], dict)
-            else None
-        ),
-    }
-    residual_stage_debug_info = save_residual_stage_diagnostics_debug(
-        shot_dir=shot_dir,
-        stem=f"mask{sel_idx}{result_suffix}",
-        stage_diagnostics=residual_stage_diagnostics,
-        stage_diffs=residual_stage_diffs,
-        guard_diagnostics=residual_guard_diagnostics,
-        final_width_info=residual_final_width_info,
-    )
 
     if show_pointcloud_gui:
         visualize_points_and_target_open3d(pts_f, target_point)
@@ -9522,28 +7365,13 @@ def _run_recognition_core_like_offline(
 
     processing_log = {
         "selected_mask_index": int(sel_idx),
-        "residual_policy_mode": residual_policy_mode,
-        "residual_policy_A": residual_policy_A_info,
-        "residual_policy_B": residual_policy_B_info,
-        "residual_policy_interaction": residual_policy_interaction_info,
-        "initial_mask_quality": initial_mask_quality_info,
         "depth_prefilter": depth_prefilter_info,
         "shape_rectangularity": shape_info,
-        "clean_rectangle_analysis": clean_rectangle_analysis_info,
-        "clean_rectangle_shadow": clean_rectangle_shadow_info,
-        "clean_rectangle_override": clean_rectangle_override_info,
         "refine_info": refine_info,
         "column_info": column_info,
         "one_sided_column_prune_info": one_sided_column_prune_info,
         "ransac_spine_plane_info": column_info.get("ransac_spine_plane"),
         "post_ransac_plane_a95_info": column_info.get("post_ransac_plane_a95_column_prune"),
-        "residual_stage_diagnostics": {
-            "debug_files": residual_stage_debug_info,
-            "stage_count": int(len(residual_stage_diagnostics)),
-            "stage_diffs": residual_stage_diffs,
-            "guard_diagnostics": residual_guard_diagnostics,
-            "final_width_info": residual_final_width_info,
-        },
         "final_reconstruction_info": final_reconstruction_info,
         "final_overlay_info": final_overlay_info,
         "step_by_step_pointcloud_projection": step_projection_summary_info,
@@ -9569,7 +7397,7 @@ def run_capture_and_pca(
     use_persistent_runtime: bool = True,
     sam_pts_side: tuple[int, int] = (32, 8),
     sam_decoder_k_keep: int = 1,
-    sam_target_len: int = 1024,
+    sam_target_len: int = 768,
     depth_merge_tolerance_raw: int = 30,
     show_pointcloud_gui: bool = False,
     save_pointcloud_debug: bool = False,
@@ -9646,7 +7474,7 @@ def run_capture_and_pca_offline(
     use_persistent_runtime: bool = True,
     sam_pts_side: tuple[int, int] = (32, 8),
     sam_decoder_k_keep: int = 1,
-    sam_target_len: int = 1024,
+    sam_target_len: int = 768,
     depth_merge_tolerance_raw: int = 30,
     show_pointcloud_gui: bool = False,
     save_pointcloud_debug: bool = False,
@@ -9793,7 +7621,42 @@ def main():
         pipe.stop()
         cv2.destroyAllWindows()
 
+# def main():
+#     ap = argparse.ArgumentParser()
+#     ap.add_argument("--out", type=str, default="captures", help="撮影と結果保存のベースフォルダ")
+#     ap.add_argument("--w", type=int, default=1280)
+#     ap.add_argument("--h", type=int, default=720)
+#     ap.add_argument("--fps", type=int, default=6)
+#     ap.add_argument("--sam_device", choices=["gpu", "cpu", "auto"], default="gpu")
+#     ap.add_argument(
+#         "--encoder",
+#         default="/home/book/pro_book/pro_hand_book_python/models/sam_vit_h_4b8939.encoder.onnx",
+#     )
+#     ap.add_argument(
+#         "--decoder",
+#         default="/home/book/pro_book/pro_hand_book_python/models/sam_vit_h_4b8939.decoder.onnx",
+#     )
+#     args = ap.parse_args()
 
+#     theta_rad, p_min, book_width, yaw = run_capture_and_pca(
+#         query="独立行政法人",
+#         out_dir=args.out,
+#         width=args.w,
+#         height=args.h,
+#         fps=args.fps,
+#         sam_device=args.sam_device,
+#         encoder_path=args.encoder,
+#         decoder_path=args.decoder,
+#         interactive=True,
+#     )
+
+#     print("\n=== Summary ===")
+#     print(f"book width = {book_width}")
+#     print(f"roll (deg) = {np.degrees(theta_rad):.6f}")
+#     print(f"p_min = {p_min}")
+
+#     #print("yaw (deg) = {:.3f}".format(np.degrees(yaw)))
+#     print("===============")
     
 
 if __name__ == "__main__":
