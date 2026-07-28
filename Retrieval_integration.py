@@ -264,7 +264,7 @@ def main_sequence(
 
             while rclpy.ok() and not waypoint_node.is_finished():
                 executor.spin_once(timeout_sec=0.1)
-            return 0.0
+            return 0.0, "recognition_fail", shot_dir
 
 
         print("roll (deg) =", np.degrees(roll))
@@ -288,7 +288,11 @@ def main_sequence(
 
         # cam[mm] -> robot[mm]
         p_robot_mm = cam_mm_to_robot_mm(arm, p_max) #ロボットベース座標系変換
-        
+
+        # アームが書籍に近づく前に、ハンドを安全な幅(GRIPPER_CLOSE)まで閉じておく．
+        # ここより後ろで閉じていると、直前の開口幅が残ったままアームが接近し書籍に衝突する．
+        HandBook_retrieval.close_to_home(HandMotors_retrieval)  # GRIPPER_CLOSEまで閉じてから開く
+
         safe_motion(
             lambda: arm.move_to_target_xyz_and_roll(
                 p_robot_mm=p_robot_mm,
@@ -297,9 +301,8 @@ def main_sequence(
             ),
             monitor,
             "insertz_before"
-        )   #書籍背表紙位置まで挿入                                    #書籍背表紙位置まで移動  
+        )   #書籍背表紙位置まで挿入                                    #書籍背表紙位置まで移動
 
-        HandBook_retrieval.close_to_home(HandMotors_retrieval)  # GRIPPER_CLOSEまで閉じてから開く
         print(f"[DEBUG] open_until_width: target={book_width - 10.0:.1f} mm")
         HandBook_retrieval.open_until_width(HandMotors_retrieval, book_width - 10.0, gravity=False)
         time.sleep(2.0)  # グリッパーが開き終わるまで待機
@@ -328,7 +331,20 @@ def main_sequence(
             waypoint_node.play_direct(config["paths"]["waypoint"]["capture_to_init"][side])
             while rclpy.ok() and not waypoint_node.is_finished():
                 executor.spin_once(timeout_sec=0.1)
-            return 0.0  # 次の書籍へ
+
+            write_log(
+                config,
+                book_name,
+                id,
+                float(np.degrees(roll)),
+                book_width,
+                side,
+                height,
+                "success",
+                shot_dir,
+                ""
+            )
+            return book_width, "success", shot_dir  # 次の書籍へ（取り出し成功）
 
             #==========================書籍バーコード認識============================================================
 
@@ -366,8 +382,8 @@ def main_sequence(
 
                 while rclpy.ok() and not waypoint_node.is_finished():
                     executor.spin_once(timeout_sec=0.1)
-                return 0.0
-    
+                return 0.0, "barcode_mismatch", shot_dir
+
 
 
         except EOFError:
@@ -404,7 +420,7 @@ def main_sequence(
                 memo
             )
             rclpy.spin_once(tp, timeout_sec=0.1)
-            return 0.0   # ← 次の本へ
+            return 0.0, "ctrl+d", shot_dir   # ← 次の本へ
 
 
         except Exception:
@@ -454,15 +470,77 @@ def main_sequence(
             memo
         )
         print('sequence done')
-        return book_width   
+        return book_width, "success", shot_dir
 
     except Exception as e:
         print("Abort sequence due to exception")
         traceback.print_exc()
         emergency_close_hand()
         os.kill(os.getpid(), signal.SIGINT)
-        return None
+        return None, "exception", locals().get("shot_dir")
         
+def setup_hardware(config):
+    """ROS2ノード・xArm・監視・リニアリフト・WaypointPlayerNodeを初期化する。
+
+    main() から呼ばれるほか、性能試験用スクリプト（performance_test_runner.py）からも
+    同じ初期化手順を再利用するために切り出した。動作は元のmain()と同一。
+    """
+    rclpy.init()
+
+    node = rclpy.create_node("book_retrieval_main")
+
+    XARM_HOST = config["robot"]["xarm"]["host"]
+
+    arm = XArm7(
+        node=node,
+        host=XARM_HOST,
+    )
+    globals()["arm"] = arm
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
+    monitor = XArmMonitor(arm)
+
+    tp = TargetPublisher()
+    executor.add_node(tp)
+
+    waypoint_node = WaypointPlayerNode(
+        node_name="xarm_init_to_capture",
+        arm=arm,
+        monitor=monitor,
+        yaml_path=config["paths"]["waypoint"]["init_to_capture"],
+        speed=1.0,
+        accel=1.0,
+    )
+    executor.add_node(waypoint_node)
+
+    return {
+        "node": node,
+        "arm": arm,
+        "executor": executor,
+        "monitor": monitor,
+        "tp": tp,
+        "waypoint_node": waypoint_node,
+    }
+
+
+def teardown_hardware(hw: dict) -> None:
+    """setup_hardware() で作成したノード群を後始末する。元のmain()のfinally節と同一。"""
+    node = hw.get("node")
+    if node is not None:
+        node.get_logger().info("Shutting down nodes...")
+
+    for key in ("waypoint_node", "tp", "node"):
+        obj = hw.get(key)
+        if obj is None:
+            continue
+        try:
+            obj.destroy_node()
+        except Exception:
+            pass
+
+    rclpy.shutdown()
+
+
 def main():
     config = load_config("Retrieval_integration.yaml")
     # ==============================
@@ -473,44 +551,13 @@ def main():
 
     retrieved_book_width_list = [0.0]
 
-    # ==============================
-    # ROS2 初期化
-    # ==============================
-    rclpy.init()
-
-    # メイン制御ノード（publish / log / trigger 用）
-    node = rclpy.create_node("book_retrieval_main")
-
-    XARM_HOST = config["robot"]["xarm"]["host"]
-
-    arm = XArm7(
-        node=node,
-        host=XARM_HOST,
-    )
-    globals()["arm"] = arm
-    # ★ MultiThreadedExecutor 推奨
-    executor = MultiThreadedExecutor()
-    executor.add_node(node)
-    monitor = XArmMonitor(arm)
-    # ==============================
-    # リニアリフト
-    # ==============================
-    tp = TargetPublisher()
-    executor.add_node(tp)
-
-    # ==============================
-    # WaypointPlayerNode（初期姿勢・撮影姿勢）
-    # ==============================
-    waypoint_node = WaypointPlayerNode(
-        node_name="xarm_init_to_capture",
-        arm=arm,
-        monitor=monitor,
-        yaml_path=config["paths"]["waypoint"]["init_to_capture"],
-        speed=1.0,
-        accel=1.0,
-    )
-
-    executor.add_node(waypoint_node)
+    hw = setup_hardware(config)
+    node = hw["node"]
+    arm = hw["arm"]
+    executor = hw["executor"]
+    monitor = hw["monitor"]
+    tp = hw["tp"]
+    waypoint_node = hw["waypoint_node"]
 
     def select_book(books):
         print("\n" + "=" * 50)
@@ -544,7 +591,7 @@ def main():
             waypoint_node.reset()
             book_width_offset = sum(retrieved_book_width_list)
 
-            retrieved_book_width = main_sequence(
+            retrieved_book_width, result, shot_dir = main_sequence(
                 config=config,
                 book_name=b["book_name"],
                 barcode_number=b["ISBN_number"],
@@ -558,6 +605,7 @@ def main():
                 waypoint_node=waypoint_node,
                 shelf_manager=waypoint_node.shelf_manager,
             )
+            print(f"result: {result}")
 
             if retrieved_book_width is None:
                 node.get_logger().error(
@@ -572,27 +620,7 @@ def main():
         node.get_logger().warn("Interrupted by user")
 
     finally:
-        # ==============================
-        # 終了処理（順番大事）
-        # ==============================
-        node.get_logger().info("Shutting down nodes...")
-
-        try:
-            waypoint_node.destroy_node()
-        except Exception:
-            pass
-
-        try:
-            tp.destroy_node()
-        except Exception:
-            pass
-
-        try:
-            node.destroy_node()
-        except Exception:
-            pass
-
-        rclpy.shutdown()
+        teardown_hardware(hw)
 
 
 if __name__ == '__main__':

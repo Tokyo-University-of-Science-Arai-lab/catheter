@@ -37,7 +37,6 @@ def aruco_marker_pose_target2cam(
     if hasattr(aruco, "ArucoDetector"):
         detector = aruco.ArucoDetector(aruco_dict, aruco.DetectorParameters())
         corners, ids, _ = detector.detectMarkers(gray)
-        print("new aruco detect")
     else:
         params = aruco.DetectorParameters_create()
         corners, ids, _ = aruco.detectMarkers(gray, aruco_dict, parameters=params)

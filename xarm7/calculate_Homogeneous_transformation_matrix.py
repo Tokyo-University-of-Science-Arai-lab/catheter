@@ -87,7 +87,7 @@ def main():
     ap.add_argument("--in-json", type=str, default="/home/book/pro_book/pro_hand_book_python/xarm7/handeye_pairs/handeye_pairs_20260613_103634_532.json", help="handeye_pairs_*.json")
     ap.add_argument("--out-json", type=str, default="", help="output json path (optional)")
     ap.add_argument("--euler-order", type=str, default="zyx",
-           認識結果はどこにあるんだっけ         help="robot euler order for [roll,pitch,yaw]. try xyz first; if bad try zyx")
+                    help="robot euler order for [roll,pitch,yaw]. try xyz first; if bad try zyx")
     ap.add_argument("--method", type=str, default="DANIILIDIS",
                     choices=["TSAI", "PARK", "HORAUD", "ANDREFF", "DANIILIDIS"],
                     help="OpenCV calibrateHandEye method")

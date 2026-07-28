@@ -66,7 +66,7 @@ def resolve_path(path_like: str | Path, *, base_dir: Path) -> Path:
 
 def load_master_books(master_json: str | Path, *, project_root: Path) -> list[dict[str, Any]]:
     """
-    master_20260216.json を読み込み，book_name / ISBN_number / bookshelf_ID を持つ辞書リストを返す．
+    master_20260216.json を読み込み，book_name / display_name / ISBN_number / bookshelf_ID を持つ辞書リストを返す．
     """
     path = resolve_path(master_json, base_dir=project_root)
 
@@ -91,6 +91,7 @@ def load_master_books(master_json: str | Path, *, project_root: Path) -> list[di
             {
                 "master_index": i,
                 "book_name": book_name,
+                "display_name": str(item.get("display_name", "")).strip() or book_name,
                 "ISBN_number": str(item.get("ISBN_number", "")).strip(),
                 "bookshelf_ID": str(item.get("bookshelf_ID", "")).strip(),
             }

@@ -26,7 +26,7 @@ def json_dump(path: Path, obj: dict) -> None:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--xarm-host", type=str, default="192.168.2.197", help="xArm IP (e.g. 192.168.2.197)")
+    ap.add_argument("--xarm-host", type=str, default="192.168.2.221", help="xArm IP (e.g. 192.168.2.221)")
     ap.add_argument(
         "--out-dir",
         type=str,

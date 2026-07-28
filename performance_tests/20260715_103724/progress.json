@@ -1,0 +1,18 @@
+{
+  "cases": {
+    "1": {
+      "state": "done",
+      "category": "recognition_incomplete",
+      "detail": "recognition_fail",
+      "book_width_mm": null,
+      "shot_dir_captures": null,
+      "shot_dir_perf": null,
+      "finished_at": "2026-07-15T10:39:00"
+    },
+    "2": {
+      "state": "in_progress",
+      "book_name": "ESC0407",
+      "started_at": "2026-07-15T10:39:00"
+    }
+  }
+}

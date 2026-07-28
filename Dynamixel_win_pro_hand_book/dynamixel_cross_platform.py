@@ -24,6 +24,12 @@ class Dynamixel:
     __ADDR_GOAL_POSITION      = 116
     __ADDR_PRESENT_POSITION   = 132
 
+    __ADDR_MOVING             = 122
+    __ADDR_PRESENT_PWM        = 124
+    __ADDR_PRESENT_CURRENT    = 126
+    __ADDR_PRESENT_TEMPERATURE = 146
+    __ADDR_HOMING_OFFSET      = 20
+
     __TORQUE_ENABLE  = 1
     __TORQUE_DISABLE = 0
 
@@ -61,6 +67,17 @@ class Dynamixel:
         self._check_write(comm, err, context=context)
         # signed 32-bit convert (present pos/vel can be negative in extended/velocity mode)
         return ctypes.c_int32(val).value
+
+    def _read2(self, dxl_id: int, addr: int, context=""):
+        val, comm, err = self.__packetHandler.read2ByteTxRx(self.__portHandler, dxl_id, addr)
+        self._check_write(comm, err, context=context)
+        # signed 16-bit convert (present current/PWM can be negative)
+        return ctypes.c_int16(val).value
+
+    def _read1(self, dxl_id: int, addr: int, context=""):
+        val, comm, err = self.__packetHandler.read1ByteTxRx(self.__portHandler, dxl_id, addr)
+        self._check_write(comm, err, context=context)
+        return val
 
     def _write1(self, dxl_id: int, addr: int, data: int, context=""):
         comm, err = self.__packetHandler.write1ByteTxRx(self.__portHandler, dxl_id, addr, data)
@@ -123,3 +140,24 @@ class Dynamixel:
     def read_position(self, dxl_id: int) -> int:
         # 現在位置を取得 (拡張位置モードでは符号付き32bitの多回転カウント)
         return self._read4(dxl_id, self.__ADDR_PRESENT_POSITION, "read_position")
+
+    # ---------- Status ----------
+    def read_torque_enable(self, dxl_id: int) -> bool:
+        return bool(self._read1(dxl_id, self.__ADDR_TORQUE_ENABLE, "read_torque_enable"))
+
+    def read_moving(self, dxl_id: int) -> bool:
+        return bool(self._read1(dxl_id, self.__ADDR_MOVING, "read_moving"))
+
+    def read_pwm(self, dxl_id: int) -> int:
+        return self._read2(dxl_id, self.__ADDR_PRESENT_PWM, "read_pwm")
+
+    def read_current(self, dxl_id: int) -> int:
+        # mA相当（X-Seriesはモデルにより換算係数が異なるため、生値[単位:約2.69mA/LSB前後]として扱う）
+        return self._read2(dxl_id, self.__ADDR_PRESENT_CURRENT, "read_current")
+
+    def read_temperature(self, dxl_id: int) -> int:
+        # 摂氏
+        return self._read1(dxl_id, self.__ADDR_PRESENT_TEMPERATURE, "read_temperature")
+
+    def read_homing_offset(self, dxl_id: int) -> int:
+        return self._read4(dxl_id, self.__ADDR_HOMING_OFFSET, "read_homing_offset")
