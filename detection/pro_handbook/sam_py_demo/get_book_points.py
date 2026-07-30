@@ -8710,27 +8710,18 @@ def _get_sam_runner_compat(
     sam_target_len: int = 1024,
     use_cache: bool = True,
 ):
-    key = (
-        str(Path(encoder_path).expanduser()),
-        str(Path(decoder_path).expanduser()),
-        str(sam_device),
-        tuple(int(v) for v in sam_pts_side),
-        int(sam_decoder_k_keep),
-        int(sam_target_len),
-    )
-    if use_cache and key in _SAM_RUNNER_CACHE:
-        print("[SAM2 CACHE] reuse SAM2 runner")
-        return _SAM_RUNNER_CACHE[key]
+    backend = os.getenv("BOOK_SEGMENTATION_BACKEND", "sam3").strip().lower()
+    if backend != "sam3":
+        raise RuntimeError(
+            "BOOK_SEGMENTATION_BACKEND must be 'sam3'; automatic SAM2 fallback is disabled"
+        )
+    from detection.pro_handbook.sam3_runtime.service.client import Sam3BatchInfer
 
-    sam_cfg = _make_sam_config_compat(
-        encoder_path=encoder_path,
-        decoder_path=decoder_path,
-        sam_device=sam_device,
-        sam_pts_side=sam_pts_side,
-        sam_decoder_k_keep=sam_decoder_k_keep,
-        sam_target_len=sam_target_len,
-    )
-    runner = SamBatchInfer_storage(sam_cfg)
+    key = ("sam3-service", os.getenv("SAM3_ENDPOINT", "http://127.0.0.1:8765"))
+    if use_cache and key in _SAM_RUNNER_CACHE:
+        print("[SAM3 CACHE] reuse SAM3 service client")
+        return _SAM_RUNNER_CACHE[key]
+    runner = Sam3BatchInfer()
     if use_cache:
         _SAM_RUNNER_CACHE[key] = runner
     return runner

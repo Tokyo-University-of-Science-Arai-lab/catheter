@@ -165,3 +165,13 @@ cuda_12.2.0_535.54.03_linux.run.1
 
 # hand-eye calibration data
 xarm7/handeye_pairs/
+
+# SAM3 runtime: heavy generated/vendored artifacts, never commit these
+detection/pro_handbook/sam3_runtime/.venv/
+detection/pro_handbook/sam3_runtime/.micromamba/
+detection/pro_handbook/sam3_runtime/models/
+detection/pro_handbook/sam3_runtime/vendor/bin/
+detection/pro_handbook/sam3_runtime/vendor/owner_repo/
+detection/pro_handbook/sam3_runtime/vendor/*.zip
+detection/pro_handbook/sam3_runtime/vendor/*.tar.bz2
+detection/pro_handbook/sam3_runtime/logs/

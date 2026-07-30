@@ -182,7 +182,7 @@ J_ACC_1 = 2.0
 # defined position for retrieval
 SECOND_POSE_DX = 327.5
 #SECOND_POSE_DX = 227.5
-INSERT_DX = 130.0
+INSERT_DX = 150.0
 RETRIEVAL_DX = SECOND_POSE_DX + INSERT_DX 
 PASS_POLL_DY = 500.0
 PASS_POLL_DX = -60.0
@@ -712,6 +712,235 @@ class XArm7:
             asynchronous=asynchronous,
         )
 
+    def moveL_to_insert_right_with_current_monitor(
+        self,
+        velocity: float = TCP_VEL_1,
+        acceleration: float = TCP_ACC_2,
+        j1_threshold: float = 2.7,
+        required_count: int = 1,
+        sample_interval: float = 0.02,
+        timeout: float = 10.0,
+        return_joint_angles=None,
+        return_speed: float = 10.0,
+        return_acceleration: float = 50.0,
+    ):
+        """
+        右挿入中にJ1電流を監視する。
+
+        Returns
+        -------
+        dict
+            正常完了:
+                {"ok": True, "reason": "completed"}
+
+            電流閾値超過:
+                {"ok": False, "reason": "current_threshold"}
+
+            タイムアウト:
+                {"ok": False, "reason": "timeout"}
+        """
+        import math
+        import time
+
+        arm = self.arm
+
+        if arm is None or not arm.connected:
+            raise RuntimeError("xArmに接続されていません")
+
+        if required_count < 1:
+            raise ValueError("required_countは1以上にしてください")
+
+        def check_result(label, result):
+            if result is None:
+                return
+
+            if isinstance(result, int):
+                code = result
+            elif isinstance(result, (tuple, list)):
+                code = int(result[0])
+            else:
+                code = 0
+
+            if code != 0:
+                raise RuntimeError(
+                    f"{label}失敗: code={code}, result={result}"
+                )
+
+        def get_j1_current():
+            currents = arm.currents
+
+            if currents is None or len(currents) < 7:
+                raise RuntimeError(
+                    f"関節電流を取得できません: {currents}"
+                )
+
+            j1 = float(currents[0])
+
+            if not math.isfinite(j1):
+                raise RuntimeError(
+                    f"J1電流値が不正です: {j1}"
+                )
+
+            return j1
+
+        def stop_motion():
+            result = arm.set_state(4)
+            check_result("挿入停止", result)
+            time.sleep(0.2)
+
+        def return_to_capture_pose():
+            if return_joint_angles is None:
+                return
+
+            if len(return_joint_angles) != 7:
+                raise ValueError(
+                    "return_joint_anglesは7要素にしてください"
+                )
+
+            # STOP状態から通常の位置制御状態へ戻す
+            check_result(
+                "motion_enable",
+                arm.motion_enable(enable=True),
+            )
+            check_result(
+                "set_mode",
+                arm.set_mode(0),
+            )
+            check_result(
+                "set_state",
+                arm.set_state(0),
+            )
+
+            time.sleep(0.2)
+
+            if arm.error_code != 0:
+                raise RuntimeError(
+                    "停止後にxArmエラーが発生しました: "
+                    f"error_code={arm.error_code}"
+                )
+
+            result = arm.set_servo_angle(
+                angle=list(return_joint_angles),
+                speed=return_speed,
+                mvacc=return_acceleration,
+                wait=True,
+                is_radian=False,
+            )
+
+            check_result(
+                "撮影姿勢への復帰",
+                result,
+            )
+
+        # 電流をレポートする設定
+        check_result(
+            "電流レポート設定",
+            arm.set_report_tau_or_i(1),
+        )
+
+        time.sleep(0.2)
+
+        # 非同期で挿入開始
+        result = self.moveL_to_insert_right(
+            velocity=velocity,
+            acceleration=acceleration,
+            asynchronous=True,
+        )
+        check_result("右挿入", result)
+
+        start_time = time.monotonic()
+        trigger_count = 0
+        moving_detected = False
+
+        while True:
+            elapsed = time.monotonic() - start_time
+
+            if not arm.connected:
+                raise RuntimeError(
+                    "xArmとの接続が切断されました"
+                )
+
+            if arm.error_code != 0:
+                stop_motion()
+
+                raise RuntimeError(
+                    "挿入中にxArmエラーが発生しました: "
+                    f"error_code={arm.error_code}"
+                )
+
+            # J1電流監視
+            j1_current = get_j1_current()
+
+            if j1_current > j1_threshold:
+                trigger_count += 1
+            else:
+                trigger_count = 0
+
+            if trigger_count >= required_count:
+                print(
+                    "[INSERT] J1電流閾値超過: "
+                    f"current={j1_current:+.3f}, "
+                    f"threshold={j1_threshold:+.3f}"
+                )
+
+                stop_motion()
+                return_to_capture_pose()
+
+                return {
+                    "ok": False,
+                    "reason": "current_threshold",
+                    "j1_current": j1_current,
+                }
+
+            # 移動完了確認
+            moving_result = arm.get_is_moving()
+
+            if isinstance(moving_result, bool):
+                moving = moving_result
+            elif (
+                isinstance(moving_result, (tuple, list))
+                and len(moving_result) >= 2
+            ):
+                check_result(
+                    "get_is_moving",
+                    moving_result,
+                )
+                moving = bool(moving_result[1])
+            else:
+                moving = None
+
+            if moving is True:
+                moving_detected = True
+
+            if (
+                moving_detected
+                and moving is False
+            ):
+                return {
+                    "ok": True,
+                    "reason": "completed",
+                }
+
+            # 短い動作でmoving=Trueを取得できなかった場合
+            if (
+                elapsed >= 1.0
+                and not moving_detected
+                and moving is False
+            ):
+                return {
+                    "ok": True,
+                    "reason": "completed",
+                }
+
+            if elapsed >= timeout:
+                stop_motion()
+
+                return {
+                    "ok": False,
+                    "reason": "timeout",
+                }
+
+            time.sleep(sample_interval)
 
     # def moveL_post_insert(self,
     #                       velocity: float = TCP_VEL_1,

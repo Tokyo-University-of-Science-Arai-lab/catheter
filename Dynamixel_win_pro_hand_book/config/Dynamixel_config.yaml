@@ -7,7 +7,7 @@ id:
 
 pos:
   gripper:
-    close: 553
+    close: -19386
     range: 8190 # 4095*2, open: close + range
     release: 400
     theta_zero: 0.252680 # radian
@@ -32,7 +32,7 @@ pos:
     range: 160000 #188664 # front: back - range
 
 thresh:
-  vel:  30 #もともと20
+  vel:  20 #もともと20
   pos: 5
 
 cont_gain:

@@ -27,6 +27,7 @@ paths:
     
   log:
     retrieval: /home/book/pro_book/pro_hand_book_python/logfile/retrieval_log.csv
+    retrieval_ods: /home/book/pro_book/pro_hand_book_python/captures/retrieval_log.ods
 
 # ---------------- 通信設定 ----------------
 target_ip: "172.20.10.2"  #"192.168.0.200"
