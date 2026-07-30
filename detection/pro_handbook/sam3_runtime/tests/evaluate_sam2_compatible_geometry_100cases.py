@@ -18,7 +18,7 @@ from detection.pro_handbook.sam_py_demo.modules.sam2_compatible_geometry import 
 )
 
 
-BASE = Path("/home/book/pro_book_SAM3/pro_hand_book_python")
+BASE = Path("/home/book/pro_book/pro_hand_book_python")
 SOURCE = BASE / "captures/100test_offline_SAM3_debug_20260724_173921"
 INPUT = BASE / "captures/100test"
 MASTER = BASE / "master_20260216.json"

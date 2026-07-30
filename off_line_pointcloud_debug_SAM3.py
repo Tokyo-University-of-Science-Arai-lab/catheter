@@ -41,7 +41,7 @@ from detection.pro_handbook.sam_py_demo.sam3_mask_refinement import (
 )
 
 
-BASE_DIR = Path("/home/book/pro_book_SAM3/pro_hand_book_python").resolve()
+BASE_DIR = Path("/home/book/pro_book/pro_hand_book_python").resolve()
 TEST_BASE_DIR = BASE_DIR / "captures" / "100test"
 MASTER_JSON = BASE_DIR / "master_20260216.json"
 OUTPUT_PARENT = BASE_DIR / "captures"

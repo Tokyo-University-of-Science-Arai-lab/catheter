@@ -19,7 +19,7 @@ from detection.pro_handbook.sam_py_demo.modules.book_width import estimate_book_
 from detection.pro_handbook.sam_py_demo.modules.pca_vector import pca_axes_fix_dir
 
 
-BASE = Path("/home/book/pro_book_SAM3/pro_hand_book_python")
+BASE = Path("/home/book/pro_book/pro_hand_book_python")
 RUN = BASE / "captures/100test_offline_SAM3_debug_20260724_173921"
 CASE = RUN / "81"
 INPUT = BASE / "captures/100test/81"

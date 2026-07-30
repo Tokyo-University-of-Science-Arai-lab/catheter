@@ -1,4 +1,4 @@
-python3 Retrieval_integration.py
+python3 Retrieval_integration_input_SAM3_editing.py
 
 ros2 run iai_cylinder height_controller
 ros2 topic pub --once /target_mm std_msgs/msg/Float32 "{data: 140.0}"

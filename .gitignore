@@ -1,173 +1,53 @@
-.pro_hand_book_fixed/
-__pycache__/
-*.pyc
-
-build/
-install/
-log/
-logs/
-logfile/
-
-captures/
-barcode_test_captures/
-captures_compare_storage/
-captures_depth_space/
-
-models/
-*.deb
-*.run
-
-#hand-eye calibration data
-xarm7/handeye_pairs/
-
-debug_*.png
-
-# virtual environments
-.pro_hand_book_fixed/
-detection/pro_handbook/sam_py_demo/OCR/.paddle_ocr/
-detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/
-sam3_env/
-.qwen_v1/
-
-# generated data
-captures/
-captures_depth_space/
-__pycache__/
-*.pyc
-
-# virtual environments
-.pro_hand_book_fixed/
-detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/
-sam3_env/
-.qwen_v1/
-
-# generated data
-captures/
-captures_depth_space/
-__pycache__/
-*.pyc
-detection/pro_handbook/sam_py_demo/captures_depth_debug/
-*.bak_path
-
 # Python / venv
 .pro_hand_book_fixed/
 detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/
 detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr_bak_*/
+detection/pro_handbook/sam_py_demo/OCR/.paddle_ocr/
+detection/pro_handbook/sam_py_demo/OCR/.paddle_ocr_bak_*/
 sam3_env/
 .qwen_v1/
+.venv/
+venv/
 __pycache__/
 *.pyc
 
 # generated capture data
 captures/
 captures_depth_space/
+captures_compare_storage/
+barcode_test_captures/
 detection/pro_handbook/sam_py_demo/captures_depth_debug/
 
+# large models
+models/
+
 # ROS2 build outputs
+build/
+install/
+log/
+logs/
+logfile/
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
 
 # backups
 *.bak_path
-*_bak_*/
-
-.pro_hand_book_fixed/
-detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/
-detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr_bak_*/
-sam3_env/
-.qwen_v1/
-captures/
-captures_depth_space/
-detection/pro_handbook/sam_py_demo/captures_depth_debug/
-ros2_ws/build/
-ros2_ws/install/
-ros2_ws/log/
-__pycache__/
-*.pyc
-*.bak_path
-*_bak_*/
-
-# virtual environments
-.pro_hand_book_fixed/
-detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/
-detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr_bak_*/
-sam3_env/
-.qwen_v1/
-
-# generated data
-captures/
-captures_depth_space/
-detection/pro_handbook/sam_py_demo/captures_depth_debug/
-
-# ROS2 build outputs
-ros2_ws/build/
-ros2_ws/install/
-ros2_ws/log/
-
-# cache / backup
-__pycache__/
-*.pyc
-*.bak_path
-*_bak_*/
-
-# virtual environments
-.pro_hand_book_fixed/
-detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/
-detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr_bak_*/
-sam3_env/
-.qwen_v1/
-
-# generated data
-captures/
-captures_depth_space/
-detection/pro_handbook/sam_py_demo/captures_depth_debug/
-
-# ROS2 build outputs
-ros2_ws/build/
-ros2_ws/install/
-ros2_ws/log/
-
-# cache / backup
-__pycache__/
-*.pyc
-*.bak_path
-*_bak_*/
-
-# OCR virtual environments
-detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr/
-detection/pro_handbook/sam_py_demo/OCR/.paadle_ocr*/
-
-# virtual environments
-.pro_hand_book_fixed/
-sam3_env/
-.qwen_v1/
-
-# generated data
-captures/
-captures_depth_space/
-detection/pro_handbook/sam_py_demo/captures_depth_debug/
-
-# ROS2 build outputs
-ros2_ws/build/
-ros2_ws/install/
-ros2_ws/log/
-
-# cache / backup
-__pycache__/
-*.pyc
-*.bak_path
+*.bak_*
 *_bak_*/
 *_broken_*/
-
-cuda_12.2.0_535.54.03_linux.run
-cuda_12.2.0_535.54.03_linux.run.1
 
 # hand-eye calibration data
 xarm7/handeye_pairs/
 
+debug_*.png
+
+cuda_12.2.0_535.54.03_linux.run
+cuda_12.2.0_535.54.03_linux.run.1
+
 # SAM3 runtime: heavy generated/vendored artifacts, never commit these
 detection/pro_handbook/sam3_runtime/.venv/
+detection/pro_handbook/sam3_runtime/.venv.*/
 detection/pro_handbook/sam3_runtime/.micromamba/
 detection/pro_handbook/sam3_runtime/models/
 detection/pro_handbook/sam3_runtime/vendor/bin/
@@ -175,3 +55,31 @@ detection/pro_handbook/sam3_runtime/vendor/owner_repo/
 detection/pro_handbook/sam3_runtime/vendor/*.zip
 detection/pro_handbook/sam3_runtime/vendor/*.tar.bz2
 detection/pro_handbook/sam3_runtime/logs/
+detection/pro_handbook/sam3_runtime/tests/outputs/
+
+# Local editor/cache
+.vscode/
+.pytest_cache/
+
+# OS/editor temporary files
+.DS_Store
+Thumbs.db
+.~lock.*
+*.swp
+
+# Local logs and experiment outputs
+xarm_current_logs/
+xarm7/xarm_current_logs/
+*.log
+
+# Local installers and archives
+*.deb
+*.run
+*.iso
+
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key

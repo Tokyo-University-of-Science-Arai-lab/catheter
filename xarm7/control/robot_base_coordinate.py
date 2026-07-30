@@ -223,15 +223,6 @@ def print_camera_debug_info(
         f"Z={p_robot_mm[2]:.2f} mm"
     )
 
-    print("\n[現在のTCP位置・姿勢]")
-    print(
-        f"X={tcp_pose[0]:.2f} mm, "
-        f"Y={tcp_pose[1]:.2f} mm, "
-        f"Z={tcp_pose[2]:.2f} mm, "
-        f"roll={tcp_pose[3]:.4f} rad, "
-        f"pitch={tcp_pose[4]:.4f} rad, "
-        f"yaw={tcp_pose[5]:.4f} rad"
-    )
 
     print("=============================================\n")
 

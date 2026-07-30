@@ -486,7 +486,7 @@ def main_sequence(
 
         # デバッグ上書き回避したいならサブディレクトリを毎回作るのがおすすめ
         # 例: bar_dir / time.strftime("%Y%m%d_%H%M%S")
-        bar_dir = Path("/home/book/pro_book_SAM3/pro_hand_book_python/captures/bookshelf_barcode")
+        bar_dir = Path("/home/book/pro_book/pro_hand_book_python/captures/bookshelf_barcode")
         bar_dir.mkdir(parents=True, exist_ok=True)
 
         detected2 = False
@@ -1068,7 +1068,7 @@ def main_sequence(
         
         waypoint_node.reset()
         waypoint_node.play_direct(
-            "/home/book/pro_book_SAM3/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/init.yaml"
+            "/home/book/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/init.yaml"
         )
 
         wait_start_time = time.time()

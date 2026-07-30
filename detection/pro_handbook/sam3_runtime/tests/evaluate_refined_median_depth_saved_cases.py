@@ -24,7 +24,7 @@ from detection.pro_handbook.sam_py_demo.sam3_mask_refinement import (
 )
 
 
-PROJECT = Path("/home/book/pro_book_SAM3/pro_hand_book_python")
+PROJECT = Path("/home/book/pro_book/pro_hand_book_python")
 CAPTURES = PROJECT / "captures"
 OUTPUT = (
     PROJECT
