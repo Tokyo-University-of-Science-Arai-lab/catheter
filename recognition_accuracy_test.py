@@ -10,7 +10,7 @@ import sys
 
 # onnxruntime-gpu が cuDNN を見つけられるよう LD_LIBRARY_PATH を設定して再起動
 _cudnn_lib = (
-    "/home/book/pro_book/pro_hand_book_python"
+    "/home/book/pro_book_SAM3/pro_hand_book_python"
     "/.pro_hand_book_fixed/lib/python3.10/site-packages/nvidia/cudnn/lib"
 )
 if _cudnn_lib not in os.environ.get("LD_LIBRARY_PATH", ""):

@@ -105,6 +105,87 @@
     "ISBN_number": "9784065218846",
     "bookshelf_ID": "1-1-1-1",
     "book_width": "44.2"
+  },
+  {
+    "book_name": "C1775ST",
+    "display_name": "Excelsior® XT-17",
+    "LOT": "26060585",
+    "expiration date": "2028-01-03",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.0"
+  },
+  {
+    "book_name": "1681189",
+    "display_name": "Excelsior® SL-10",
+    "LOT": "26124294",
+    "expiration date": "2028-02-18",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.0"
+  },
+  {
+    "book_name": "EZAS3021",
+    "display_name": "Neuroform Atlas",
+    "LOT": "26022095",
+    "expiration date": "2028-12-09",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "16.8"
+  },
+  {
+    "book_name": "10CSW12612",
+    "display_name": "Wallaby Avenir Coil System",
+    "LOT": "WCS12612",
+    "expiration date": "2031-04-14",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "15.2"
+  },
+  {
+    "book_name": "AIN-CHI-200R",
+    "display_name": "CHIKAI",
+    "LOT": "260302A25A",
+    "expiration date": "2029-02",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "15.0"
+  },
+  {
+    "book_name": "SS2-40-070H",
+    "display_name": "SHOURYU2",
+    "LOT": "KR046055",
+    "expiration date": "2029-03-31",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.1"
+  },
+  {
+    "book_name": "KMDA044178",
+    "display_name": "Guidepost",
+    "LOT": "不明",
+    "expiration date": "2029-03-25",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "26"
+  },
+  {
+    "book_name": "DAC6F115",
+    "display_name": "Esperance Distal Access Catheter",
+    "LOT": "DAC00239",
+    "expiration date": "2027-01-16",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "27.0"
+  },
+  {
+    "book_name": "ESC0305",
+    "display_name": "TransForm",
+    "LOT": "26007422",
+    "expiration date": "2027-12-02",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.0"
   }
 
 ]

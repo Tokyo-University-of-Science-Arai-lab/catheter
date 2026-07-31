@@ -197,7 +197,7 @@ def main_sequence(
         # node.get_logger().info("Start self-localization loop: wait /navigation_goal pulses until /navigation_goal_final==True")
         # node.get_logger().info("Waiting for /navigation_goal_final ...")
 
-        bar_dir = Path("/home/book/pro_book/pro_hand_book_python/captures/bookshelf_barcode")
+        bar_dir = Path("/home/book/pro_book_SAM3/pro_hand_book_python/captures/bookshelf_barcode")
         bar_dir.mkdir(parents=True, exist_ok=True)
 
         # init → capture 姿勢へ（Waypoint）
@@ -440,7 +440,7 @@ def main_sequence(
         
         waypoint_node.reset()
         waypoint_node.play_direct(
-            "/home/book/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/init.yaml"
+            "/home/book/pro_book_SAM3/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/init.yaml"
         )
 
         wait_start_time = time.time()
