@@ -755,7 +755,7 @@ def main_sequence(
 
                 HandBook_retrieval.open_until_width(
                     HandMotors_retrieval,
-                    book_width,
+                    book_width - 10.0,
                     gravity=False,
                 )
 
