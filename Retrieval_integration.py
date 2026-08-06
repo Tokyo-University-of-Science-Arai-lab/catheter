@@ -508,7 +508,7 @@ def setup_hardware(config):
         arm=arm,
         monitor=monitor,
         yaml_path=config["paths"]["waypoint"]["init_to_capture"],
-        speed=1.0,
+        speed=0.7,
         accel=1.0,
     )
     executor.add_node(waypoint_node)

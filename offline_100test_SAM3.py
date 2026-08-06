@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
-"""Latest SAM3 book-width offline evaluator, based on offline_pointcloud_debug.
+"""SAM2時代の100回試験（captures/100test）を、現在のSAM3で再実行する。
 
-1枚の画像には全品目が並んで写っているため、画像1枚に対して master json の
-全品目を query として順に認識させる。
-  評価数 = 画像枚数(N_SHOTS) × 品目数(len(master_books))
-5枚 × 20種 = 100評価。撮影は5回で済む。
+2026-07-08 に SAM2 で行った試験
+（captures/100test_offline/20260708_203730）と直接比較するためのもの。
+入力画像・品目の並び・正解幅を当時と揃えてあるので、
+結果CSVの test_index どうしがそのまま対応する。
+
+構成は 5shot 版（offline_pointcloud_debug_SAM3.py）とは違う:
+  画像1枚 = 1品目 = 1試行。10品目を1周として、それを10ラウンド繰り返す。
+    master_index = (test_index - 1) % 品目数
+    round_index  = (test_index - 1) // 品目数 + 1
+  例: 1〜10 が品目0〜9（ラウンド1）、11〜20 が品目0〜9（ラウンド2）…
+
+実行はリポジトリルートから:
+    python offline_100test_SAM3.py --external-service
 """
 
 from detection.pro_handbook.sam_py_demo.get_book_points_sam3_refined_sam2_width import (
-    prepare_offline_shot,
     run_capture_and_pca_offline_sam3_refined_sam2_width,
 )
 from detection.pro_handbook.sam3_runtime.integration_service_manager import (
@@ -33,23 +41,24 @@ from contextlib import redirect_stdout, redirect_stderr
 BASE_DIR = Path(__file__).resolve().parent
 
 # 元の入力データ（<N>/after_init_rgb.png ... の連番フォルダ）
-TEST_BASE_DIR = BASE_DIR / "captures" / "5shot_catheter"
+TEST_BASE_DIR = BASE_DIR / "captures" / "100test"
 
-# offline実行結果の保存先
-OFFLINE_BASE_DIR = BASE_DIR / "captures" / "5shot_catheter_offline"
+# offline実行結果の保存先（SAM2時代と同じ場所・同じ階層構造）
+OFFLINE_BASE_DIR = BASE_DIR / "captures" / "100test_offline"
 
-MASTER_JSON = BASE_DIR / "master_20260216.json"
+# 100test 専用のマスタ。master_20260216.json は品目が20種に増えており、
+# 幅の値も当時と変わっているので流用できない。
+MASTER_JSON = BASE_DIR / "master_100test.json"
 
 SAM_DEVICE = "gpu"
 
-# 撮影した画像の枚数。各画像に対して master json の全品目を試す
-N_SHOTS = 5
+START_INDEX = 1
+END_INDEX = 100
 
 # 評価しきい値 [mm]
 ERROR_THRESHOLDS_MM = [1.0, 1.5, 2.0]
 
 # offline入力としてコピーするファイル
-# run_capture_and_pca_offline はこの2つを shot_dir から読む想定
 INPUT_FILES = [
     "after_init_rgb.png",
     "after_init_depth.npy",
@@ -74,7 +83,7 @@ class Tee:
 
 def make_unique_run_dir(base_dir: Path, timestamp: str) -> Path:
     """
-    captures/offline_POINTCLOUD_DEBUG_SAM3_<timestamp> を作る。
+    captures/100test_offline/<timestamp> を作る。
     同じ秒に複数回実行して重複した場合は _001, _002 ... を付ける。
     """
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -94,6 +103,10 @@ def make_unique_run_dir(base_dir: Path, timestamp: str) -> Path:
 
 
 def load_master(master_json: Path):
+    """book_name（=query）と book_width（=正解幅）だけを読む。
+
+    `_` で始まるキーは編集時のメモ用なので無視される。
+    """
     with open(master_json, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -106,7 +119,7 @@ def load_master(master_json: Path):
             raise ValueError(f"master json の {i} 番目が不正です: {item}") from e
 
         books.append({
-            "master_index": i,          # 絞り込んでも元の通し番号を保てるよう持たせる
+            "master_index": i,
             "book_name": book_name,
             "book_width_mm": book_width_mm,
             "raw": item,
@@ -115,23 +128,17 @@ def load_master(master_json: Path):
     return books
 
 
-def safe_dir_name(name: str) -> str:
-    """book_name をフォルダ名に使えるよう、記号を _ に置き換える。"""
-    return "".join(c if (c.isalnum() or c in "-_") else "_" for c in name)
-
-
-def build_trials(books, shot_ids):
+def get_book_info_for_test_index(master_books, test_index: int):
     """
-    (shot_id, book_info) の全組み合わせを作る。
-
-    shot_ids=[1,2] / 20種 なら 40件。
-    同じ画像を使い回して query だけ変える構成。
+    1ラウンドで全品目を1枚ずつカバーする構成。
+    品目数=10 のとき:
+      1〜10  -> master[0]〜master[9]  (ラウンド1)
+      11〜20 -> master[0]〜master[9]  (ラウンド2)
     """
-    trials = []
-    for shot_id in shot_ids:
-        for book_info in books:
-            trials.append((shot_id, book_info))
-    return trials
+    n_books = len(master_books)
+    master_index = (test_index - 1) % n_books
+    round_index = (test_index - 1) // n_books + 1
+    return master_index, round_index, master_books[master_index]
 
 
 def safe_float_or_none(x):
@@ -190,27 +197,6 @@ def copy_offline_inputs(source_shot_dir: Path, run_shot_dir: Path):
     return manifest
 
 
-def prepare_shot_once(source_shot_dir: Path, prepared_shot_dir: Path):
-    """
-    画像1枚につき1回だけ、query に依存しない処理（OCR・SAM3マスク生成）を済ませる。
-
-    同じ画像を20種の query で処理するため、これを試行ごとにやり直すと
-    OCRとSAM3を19回ぶん無駄に計算することになる。生成物は各試行のフォルダへ
-    コピーされるので、出力の中身は毎回計算した場合と同じになる。
-    """
-    copy_offline_inputs(
-        source_shot_dir=source_shot_dir,
-        run_shot_dir=prepared_shot_dir,
-    )
-    started = time.perf_counter()
-    prepared = prepare_offline_shot(
-        prepared_shot_dir.resolve(),
-        sam_device=SAM_DEVICE,
-    )
-    prepared["wall_seconds"] = float(time.perf_counter() - started)
-    return prepared
-
-
 def save_json(path: Path, obj):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -218,18 +204,41 @@ def save_json(path: Path, obj):
         json.dump(obj, f, ensure_ascii=False, indent=2)
 
 
+def parse_case_spec(spec: str | None):
+    """'5' や '1-20' や '1-10,51-60' を test_index のリストに変換する。"""
+    if spec is None:
+        return list(range(START_INDEX, END_INDEX + 1))
+
+    indices = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            indices.extend(range(int(lo), int(hi) + 1))
+        else:
+            indices.append(int(part))
+
+    if not indices:
+        raise ValueError(f"--cases の指定が空です: {spec!r}")
+    for i in indices:
+        if not START_INDEX <= i <= END_INDEX:
+            raise ValueError(f"--cases は {START_INDEX}〜{END_INDEX} の範囲です: {i}")
+    return sorted(set(indices))
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Run the latest SAM3 recognition on saved RGB-D shots "
-                    "(all master items per shot)."
+        description="Re-run the SAM2-era 100-case test (captures/100test) with the current SAM3 pipeline."
     )
     parser.add_argument(
-        "--shots", type=str,
-        help="使う画像番号。例: --shots 1,3 / --shots 1-3 （既定: 1〜N_SHOTS）",
+        "--cases", type=str,
+        help="実行するケース番号。例: --cases 1-10 / --cases 1,5,7 （既定: 1〜100）",
     )
     parser.add_argument(
-        "--book-index", type=int, action="append",
-        help="master json の何番目だけを試すか（0始まり、複数指定可）",
+        "--master", type=str, default=None,
+        help=f"使うマスタJSON（既定: {MASTER_JSON.name}）",
     )
     parser.add_argument(
         "--external-service",
@@ -239,66 +248,35 @@ def parse_args():
     return parser.parse_args()
 
 
-def parse_shot_ids(spec: str | None):
-    """'1,3' や '1-3' を [1,3] / [1,2,3] に変換する。未指定なら 1〜N_SHOTS。"""
-    if spec is None:
-        return list(range(1, N_SHOTS + 1))
-
-    shot_ids = []
-    for part in spec.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            lo, hi = part.split("-", 1)
-            shot_ids.extend(range(int(lo), int(hi) + 1))
-        else:
-            shot_ids.append(int(part))
-
-    if not shot_ids:
-        raise ValueError(f"--shots の指定が空です: {spec!r}")
-    if any(s < 1 for s in shot_ids):
-        raise ValueError(f"--shots は1以上を指定してください: {spec!r}")
-    return sorted(set(shot_ids))
-
-
-def filter_books(master_books, book_indices):
-    """--book-index が指定されていればその品目だけに絞る。"""
-    if not book_indices:
-        return master_books
-    for i in book_indices:
-        if not 0 <= i < len(master_books):
-            raise IndexError(
-                f"--book-index {i} は範囲外です（0〜{len(master_books) - 1}）"
-            )
-    return [master_books[i] for i in sorted(set(book_indices))]
-
-
 def main():
     args = parse_args()
-    shot_ids = parse_shot_ids(args.shots)
+    master_json = Path(args.master).resolve() if args.master else MASTER_JSON
+    test_indices = parse_case_spec(args.cases)
 
-    master_books = load_master(MASTER_JSON)
-    books = filter_books(master_books, args.book_index)
-    trials = build_trials(books, shot_ids)
-    total_trials = len(trials)
+    master_books = load_master(master_json)
+    n_books = len(master_books)
 
-    print("\n===== BOOK WIDTH OFFLINE EVAL START =====")
+    if END_INDEX % n_books != 0:
+        print(
+            f"⚠ 警告: 品目数 {n_books} で {END_INDEX} ケースを割り切れません。"
+            f"ラウンドの端数が出るのでマスタの品目数を確認してください。"
+        )
+
+    print("\n===== BOOK WIDTH OFFLINE EVAL START (100test / SAM3) =====")
     print(f"source test dir : {TEST_BASE_DIR}")
     print(f"offline base dir: {OFFLINE_BASE_DIR}")
-    print(f"master json     : {MASTER_JSON}")
+    print(f"master json     : {master_json}")
     print(f"sam_device      : {SAM_DEVICE}")
-    print(f"shots           : {shot_ids}")
-    print(f"books           : {len(books)} / {len(master_books)} 種")
-    print(f"total trials    : {len(shot_ids)} 枚 × {len(books)} 種 = {total_trials}")
-    print("=========================================\n")
+    print(f"books           : {n_books} 種 × {END_INDEX // n_books} ラウンド")
+    print(f"total cases     : {len(test_indices)}")
+    print("==========================================================\n")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_root_dir = make_unique_run_dir(OFFLINE_BASE_DIR, timestamp)
 
-    out_csv = run_root_dir / "results.csv"
-    out_json = run_root_dir / "results.json"
-    out_summary = run_root_dir / "summary.json"
+    out_csv = run_root_dir / f"book_width_eval_results_{timestamp}.csv"
+    out_json = run_root_dir / f"book_width_eval_results_{timestamp}.json"
+    out_summary = run_root_dir / f"book_width_eval_summary_{timestamp}.json"
     run_log = run_root_dir / "run.log"
     run_config_json = run_root_dir / "eval_run_config.json"
 
@@ -307,20 +285,21 @@ def main():
         "run_root_dir": str(run_root_dir),
         "source_test_base_dir": str(TEST_BASE_DIR),
         "offline_base_dir": str(OFFLINE_BASE_DIR),
-        "master_json": str(MASTER_JSON),
+        "master_json": str(master_json),
         "sam_device": SAM_DEVICE,
-        "shot_ids": shot_ids,
-        "n_books": len(books),
-        "book_names": [b["book_name"] for b in books],
-        "total_trials": total_trials,
+        "start_index": START_INDEX,
+        "end_index": END_INDEX,
+        "test_indices": test_indices,
+        "n_books": n_books,
+        "n_rounds": END_INDEX // n_books,
+        "book_names": [b["book_name"] for b in master_books],
+        "gt_widths_mm": [b["book_width_mm"] for b in master_books],
         "error_thresholds_mm": ERROR_THRESHOLDS_MM,
         "input_files": INPUT_FILES,
-        "output_structure": "<timestamp>/shot<shot_id>/<master_index>_<book_name>/",
+        "output_structure": "captures/100test_offline/<timestamp>/<test_index>/",
         "recognition_api": "run_capture_and_pca_offline_sam3_refined_sam2_width",
-        "query_independent_stage": (
-            "OCR と SAM3 マスク生成は query に依存しないため画像ごとに1回だけ実行し、"
-            "生成物を各試行のフォルダへコピーして使い回す"
-        ),
+        "index_mapping": "master_index = (test_index - 1) % n_books, round_index = (test_index - 1) // n_books + 1",
+        "baseline_for_comparison": "captures/100test_offline/20260708_203730 (SAM2, 旧 ~/pro_book)",
         "service_policy": "external only" if args.external_service else "reuse ready service, otherwise start and stop owned service",
     }
     save_json(run_config_json, run_config)
@@ -329,10 +308,6 @@ def main():
     print(f"設定JSON: {run_config_json}")
 
     results = []
-    # 画像ごとの前処理（OCR・SAM3）の置き場。試行フォルダとは分けておく。
-    prepared_root = run_root_dir / "_prepared"
-    prepared_by_shot: dict[int, dict] = {}
-    prepare_records = []
     service_session = Sam3ServiceSession()
     service_info = {
         "endpoint": service_session.endpoint,
@@ -367,22 +342,22 @@ def main():
         encoding="utf-8",
     )
 
-    for trial_no, (shot_id, book_info) in enumerate(trials, start=1):
-        master_index = book_info["master_index"]
+    total_cases = len(test_indices)
+
+    for case_no, test_index in enumerate(test_indices, start=1):
+        master_index, round_index, book_info = get_book_info_for_test_index(
+            master_books, test_index
+        )
         book_name = book_info["book_name"]
         gt_width_mm = book_info["book_width_mm"]
 
-        source_shot_dir = TEST_BASE_DIR / str(shot_id)
-        # 同じ画像を複数queryで処理するので、組み合わせごとに別フォルダへ出力する
-        # （認識関数が shot_dir へ中間ファイルを書き込むため、共有すると上書きされる）
-        run_shot_dir = (
-            run_root_dir / f"shot{shot_id}" / f"{master_index:02d}_{safe_dir_name(book_name)}"
-        )
+        source_shot_dir = TEST_BASE_DIR / str(test_index)
+        # SAM2時代と同じ <timestamp>/<test_index>/ 構造にして、突き合わせを楽にする
+        run_shot_dir = run_root_dir / str(test_index)
         run_shot_dir.mkdir(parents=True, exist_ok=True)
 
         case_log_path = run_shot_dir / "offline_run_console.log"
 
-        # デフォルト値。例外時に未定義にならないようにする。
         pred_width_mm = None
         abs_error_mm = None
         returned_shot_dir = None
@@ -398,9 +373,10 @@ def main():
 
                 try:
                     print("\n" + "=" * 60)
-                    print(f"trial            : {trial_no} / {total_trials}")
-                    print(f"shot_id          : {shot_id}")
+                    print(f"case             : {case_no} / {total_cases}")
+                    print(f"test_index       : {test_index}")
                     print(f"master_index     : {master_index}")
+                    print(f"round_index      : {round_index}")
                     print(f"book_name        : {book_name}")
                     print(f"gt_width_mm      : {gt_width_mm}")
                     print(f"source_shot_dir  : {source_shot_dir}")
@@ -419,37 +395,12 @@ def main():
                     print("✔ copied offline inputs")
                     print(json.dumps(input_manifest, ensure_ascii=False, indent=2))
 
-                    # query に依存しない処理は、この画像で最初の試行のときだけ実行する
-                    prepared = prepared_by_shot.get(shot_id)
-                    if prepared is None:
-                        print(f"\n--- shot{shot_id}: query非依存の前処理（OCR + SAM3）---")
-                        prepared = prepare_shot_once(
-                            source_shot_dir=source_shot_dir,
-                            prepared_shot_dir=prepared_root / f"shot{shot_id}",
-                        )
-                        prepared_by_shot[shot_id] = prepared
-                        prepare_records.append({
-                            "shot_id": shot_id,
-                            "source_shot_dir": str(source_shot_dir),
-                            "prepared_shot_dir": prepared["prepared_shot_dir"],
-                            "mask_count": prepared["mask_count"],
-                            "prepare_seconds": prepared["wall_seconds"],
-                            "first_trial_no": trial_no,
-                        })
-                        save_json(prepared_root / "prepare_timing.json", prepare_records)
-                        print(
-                            f"--- 前処理完了: {prepared['wall_seconds']:.3f} 秒 / "
-                            f"マスク {prepared['mask_count']} 個 ---\n"
-                        )
-
-                    # 前処理の時間は elapsed_sec に含めない（試行ごとの認識時間を見るため）
                     start = time.perf_counter()
 
                     recognition = run_capture_and_pca_offline_sam3_refined_sam2_width(
                         query=book_name,
                         shot_dir=run_shot_dir.resolve(),
                         sam_device=SAM_DEVICE,
-                        prepared=prepared,
                     )
                     theta_rad = float(recognition["roll_rad"])
                     p_min = recognition["point_3d"]
@@ -466,9 +417,9 @@ def main():
                     signed_error_mm = pred_width_mm - gt_width_mm
 
                     row = {
-                        "trial_no": trial_no,
-                        "shot_id": shot_id,
+                        "test_index": test_index,
                         "master_index": master_index,
+                        "round_index": round_index,
                         "book_name": book_name,
                         "gt_book_width_mm": gt_width_mm,
                         "pred_book_width_mm": pred_width_mm,
@@ -496,9 +447,9 @@ def main():
                     elapsed = time.perf_counter() - start
 
                     row = {
-                        "trial_no": trial_no,
-                        "shot_id": shot_id,
+                        "test_index": test_index,
                         "master_index": master_index,
+                        "round_index": round_index,
                         "book_name": book_name,
                         "gt_book_width_mm": gt_width_mm,
                         "pred_book_width_mm": None,
@@ -516,8 +467,8 @@ def main():
                     }
 
                     print("\n❌ FAILED")
-                    print(f"trial           : {trial_no} / {total_trials}")
-                    print(f"shot_id         : {shot_id}")
+                    print(f"case            : {case_no} / {total_cases}")
+                    print(f"test_index      : {test_index}")
                     print(f"book_name       : {book_name}")
                     print(f"source_shot_dir : {source_shot_dir}")
                     print(f"run_shot_dir    : {run_shot_dir}")
@@ -535,31 +486,22 @@ def main():
         # 途中で落ちても結果が残るように毎回保存
         save_results(results, out_csv, out_json)
 
-    summary = make_summary(results, total_trials)
+    summary = make_summary(results, total_cases)
     save_summary(summary, out_summary)
 
     print_summary(summary)
-
-    if prepare_records:
-        prepare_total = sum(r["prepare_seconds"] for r in prepare_records)
-        trial_total = sum(r["elapsed_sec"] for r in results)
-        print("\n--- query非依存の前処理（OCR + SAM3）---")
-        print(f"実行回数   : {len(prepare_records)} 回（画像の枚数と同じ）")
-        print(f"合計時間   : {prepare_total:.1f} 秒")
-        print(f"試行の合計 : {trial_total:.1f} 秒")
-        print(f"総計       : {prepare_total + trial_total:.1f} 秒")
 
     print("\n保存先:")
     print(f"RUN ROOT: {run_root_dir}")
     print(f"CSV     : {out_csv}")
     print(f"JSON    : {out_json}")
     print(f"SUMMARY : {out_summary}")
-    print("=========================================\n")
+    print("==========================================================\n")
     if not args.external_service:
         service_session.stop_if_owned()
 
 
-def make_summary(results, total_trials: int):
+def make_summary(results, total_cases: int):
     success_results = [r for r in results if r["status"] == "success"]
     fail_results = [r for r in results if r["status"] != "success"]
 
@@ -579,8 +521,8 @@ def make_summary(results, total_trials: int):
         count = sum(1 for e in errors if 0.0 <= e <= th)
         threshold_counts[f"within_{th:.1f}mm"] = {
             "count": count,
-            "denominator": total_trials,
-            "rate": count / total_trials if total_trials > 0 else None,
+            "denominator": total_cases,
+            "rate": count / total_cases if total_cases > 0 else None,
         }
 
     if errors:
@@ -597,7 +539,7 @@ def make_summary(results, total_trials: int):
         mean_signed_error = None
 
     summary = {
-        "total_trials": total_trials,
+        "total_cases": total_cases,
         "success_count": len(success_results),
         "fail_count": len(fail_results),
         "threshold_counts": threshold_counts,
@@ -611,8 +553,7 @@ def make_summary(results, total_trials: int):
         "per_book": make_per_book_summary(results),
         "failure_cases": [
             {
-                "trial_no": r["trial_no"],
-                "shot_id": r["shot_id"],
+                "test_index": r["test_index"],
                 "book_name": r["book_name"],
                 "error": r["error"],
                 "source_shot_dir": r["source_shot_dir"],
@@ -648,12 +589,11 @@ def make_per_book_summary(results):
         errors = entry["abs_errors_mm"]
         entry["mean_abs_error_mm"] = sum(errors) / len(errors) if errors else None
         entry["max_abs_error_mm"] = max(errors) if errors else None
-        # 同じ品目を複数枚で測ったときのばらつき（再現性の指標）
+        # 同じ品目を10ラウンド測ったときのばらつき（再現性の指標）
         entry["stdev_abs_error_mm"] = (
             statistics.stdev(errors) if len(errors) >= 2 else None
         )
 
-    # master json の並び順で返す
     return sorted(per_book.values(), key=lambda e: e["master_index"])
 
 
@@ -661,9 +601,9 @@ def save_results(results, out_csv: Path, out_json: Path):
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
     fieldnames = [
-        "trial_no",
-        "shot_id",
+        "test_index",
         "master_index",
+        "round_index",
         "book_name",
         "gt_book_width_mm",
         "pred_book_width_mm",
@@ -700,13 +640,13 @@ def save_summary(summary, out_summary: Path):
 
 
 def print_summary(summary):
-    print("\n\n===== BOOK WIDTH OFFLINE EVAL SUMMARY =====")
+    print("\n\n===== BOOK WIDTH OFFLINE EVAL SUMMARY (100test / SAM3) =====")
 
-    total_trials = summary["total_trials"]
+    total_cases = summary["total_cases"]
 
-    print(f"総試行回数 : {total_trials}")
-    print(f"成功回数   : {summary['success_count']} / {total_trials}")
-    print(f"失敗回数   : {summary['fail_count']} / {total_trials}")
+    print(f"総試行回数 : {total_cases}")
+    print(f"成功回数   : {summary['success_count']} / {total_cases}")
+    print(f"失敗回数   : {summary['fail_count']} / {total_cases}")
     print("")
 
     for th in ERROR_THRESHOLDS_MM:
@@ -716,25 +656,18 @@ def print_summary(summary):
         denom = item["denominator"]
         rate = item["rate"]
 
-        if rate is None:
-            rate_text = "None"
-        else:
-            rate_text = f"{rate * 100:.1f}%"
-
+        rate_text = "None" if rate is None else f"{rate * 100:.1f}%"
         print(f"0〜{th:.1f}mm以内: {count} / {denom} ({rate_text})")
 
     print("")
 
     mean_abs_error = summary["mean_abs_error_mm_success_only"]
-    median_abs_error = summary["median_abs_error_mm_success_only"]
-    min_abs_error = summary["min_abs_error_mm_success_only"]
-    max_abs_error = summary["max_abs_error_mm_success_only"]
 
     if mean_abs_error is not None:
         print(f"平均絶対誤差[成功のみ] : {mean_abs_error:.3f} mm")
-        print(f"中央値絶対誤差[成功のみ]: {median_abs_error:.3f} mm")
-        print(f"最小絶対誤差[成功のみ] : {min_abs_error:.3f} mm")
-        print(f"最大絶対誤差[成功のみ] : {max_abs_error:.3f} mm")
+        print(f"中央値絶対誤差[成功のみ]: {summary['median_abs_error_mm_success_only']:.3f} mm")
+        print(f"最小絶対誤差[成功のみ] : {summary['min_abs_error_mm_success_only']:.3f} mm")
+        print(f"最大絶対誤差[成功のみ] : {summary['max_abs_error_mm_success_only']:.3f} mm")
         print(
             f"平均符号付き誤差[成功のみ]: "
             f"{summary['mean_signed_error_mm_success_only']:.3f} mm"
@@ -745,20 +678,20 @@ def print_summary(summary):
         print("平均絶対誤差[成功のみ] : None")
 
     print("\n--- 品目ごと ---")
-    print(f"{'idx':>3} {'book_name':22} {'正解':>6} {'成功':>7} {'平均誤差':>9} {'最大誤差':>9} {'ばらつき':>9}")
+    print(f"{'idx':>3} {'book_name':30} {'正解':>6} {'成功':>7} {'平均誤差':>9} {'最大誤差':>9} {'ばらつき':>9}")
     for e in summary["per_book"]:
         def fmt(v):
             return f"{v:9.3f}" if v is not None else f"{'-':>9}"
 
         print(
-            f"{e['master_index']:3d} {e['book_name'][:22]:22} "
+            f"{e['master_index']:3d} {e['book_name'][:30]:30} "
             f"{e['gt_book_width_mm']:6.1f} "
             f"{e['n_success']:3d}/{e['n_trials']:<3d} "
             f"{fmt(e['mean_abs_error_mm'])} {fmt(e['max_abs_error_mm'])} "
             f"{fmt(e['stdev_abs_error_mm'])}"
         )
 
-    print("===========================================\n")
+    print("=============================================================\n")
 
 
 if __name__ == "__main__":

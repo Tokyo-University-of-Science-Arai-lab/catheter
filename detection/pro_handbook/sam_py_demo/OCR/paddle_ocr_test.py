@@ -475,6 +475,35 @@ def OCR_main(shot_dir: str | Path):
     return OCR_main_cached(shot_dir)
 
 
+def _run_worker_loop() -> None:
+    """常駐workerモード．
+
+    標準入力から shot_dir を1行ずつ受け取り、OCRモデルを作り直さずに
+    使い回して処理する。1行の結果を1行のJSONで標準出力へ返す
+    （呼び出し側は1行読めば1件の完了とわかる）。バッチ評価のように
+    同一プロセス内で何十〜何百件も処理するときのモデル再生成コストを消す。
+    単発実行（今までの `python paddle_ocr_test.py <shot_dir>`）には影響しない。
+    """
+    for line in sys.stdin:
+        shot_dir_str = line.strip()
+        if not shot_dir_str:
+            continue
+        try:
+            OCR_main_cached(shot_dir_str)
+            print(json.dumps({"ok": True, "shot_dir": shot_dir_str}), flush=True)
+        except Exception as exc:  # noqa: BLE001 - report to caller, keep worker alive
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "shot_dir": shot_dir_str,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                ),
+                flush=True,
+            )
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--check-offline-assets":
         print(
@@ -484,6 +513,9 @@ if __name__ == "__main__":
                 indent=2,
             )
         )
+        raise SystemExit(0)
+    if len(sys.argv) == 2 and sys.argv[1] == "--worker":
+        _run_worker_loop()
         raise SystemExit(0)
     if len(sys.argv) < 2:
         raise SystemExit("usage: python paddle_ocr_test.py <shot_dir>")

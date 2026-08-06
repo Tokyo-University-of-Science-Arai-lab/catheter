@@ -105,24 +105,6 @@ def _mask_to_binary(mask, h: int, w: int) -> np.ndarray:
     return b
 
 
-def _poly_to_mask(poly, h: int, w: int) -> np.ndarray:
-    """
-    OCR polygon を塗りつぶした 0/1 mask に変換
-    """
-    pts = np.asarray(poly, dtype=np.float32).reshape(-1, 2)
-
-    if pts.shape[0] < 3:
-        return np.zeros((h, w), dtype=np.uint8)
-
-    pts = np.round(pts).astype(np.int32)
-    pts[:, 0] = np.clip(pts[:, 0], 0, w - 1)
-    pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
-
-    canvas = np.zeros((h, w), dtype=np.uint8)
-    cv2.fillPoly(canvas, [pts], 1)
-    return canvas
-
-
 def _mask_bbox(mask_bin: np.ndarray):
     ys, xs = np.where(mask_bin > 0)
     if len(xs) == 0 or len(ys) == 0:
@@ -135,19 +117,35 @@ def _mask_bbox(mask_bin: np.ndarray):
     }
 
 
-def _compute_iou(mask_a: np.ndarray, mask_b: np.ndarray):
-    """
-    0/1 mask 同士の IoU
-    """
-    inter = int(np.logical_and(mask_a > 0, mask_b > 0).sum())
-    if inter == 0:
-        return 0.0, 0, int(np.logical_or(mask_a > 0, mask_b > 0).sum())
+def _poly_bbox_clipped(poly, h: int, w: int):
+    """OCR polygon を囲む矩形を画像内にクリップして返す（無ければ None）。"""
+    pts = np.asarray(poly, dtype=np.float32).reshape(-1, 2)
+    if pts.shape[0] < 3:
+        return None
+    x0 = int(np.clip(np.floor(pts[:, 0].min()), 0, w - 1))
+    x1 = int(np.clip(np.ceil(pts[:, 0].max()), 0, w - 1))
+    y0 = int(np.clip(np.floor(pts[:, 1].min()), 0, h - 1))
+    y1 = int(np.clip(np.ceil(pts[:, 1].max()), 0, h - 1))
+    if x1 < x0 or y1 < y0:
+        return None
+    return x0, y0, x1, y1
 
-    union = int(np.logical_or(mask_a > 0, mask_b > 0).sum())
-    if union <= 0:
-        return 0.0, inter, 0
 
-    return float(inter / union), inter, union
+def _poly_to_local_mask(poly, bbox):
+    """
+    OCR polygon を、画面全体ではなく bbox サイズのキャンバスへ塗りつぶす。
+    テキスト領域は画面全体からすればごく小さいので，全画面でmaskを
+    作って logical_and/or を毎回計算するより大幅に速い。
+    """
+    x0, y0, x1, y1 = bbox
+    local_h, local_w = y1 - y0 + 1, x1 - x0 + 1
+    pts = np.asarray(poly, dtype=np.float32).reshape(-1, 2)
+    pts = np.round(pts).astype(np.int32)
+    pts[:, 0] = np.clip(pts[:, 0] - x0, 0, local_w - 1)
+    pts[:, 1] = np.clip(pts[:, 1] - y0, 0, local_h - 1)
+    canvas = np.zeros((local_h, local_w), dtype=np.uint8)
+    cv2.fillPoly(canvas, [pts], 1)
+    return canvas
 
 
 def match_text_to_mask(
@@ -192,6 +190,10 @@ def match_text_to_mask(
 
     # sam_quads という名前だが、中身は SAM の元マスクを受ける
     sam_masks = [_mask_to_binary(m, h, w) for m in sam_quads]
+    # text領域はSAMマスクに比べて画面全体からすればごく小さいので、
+    # マスク側の面積だけ先に出しておき、IoUはtextのbbox内だけで計算する
+    # （text_mask & sam_mask はbboxの外では常に0なので結果は全画面計算と厳密に同じ）。
+    sam_areas = [int(m.sum()) for m in sam_masks]
 
     names = [f"mask_{i+1}" for i in range(len(sam_masks))]
     book_texts = {n: [] for n in names}
@@ -203,8 +205,9 @@ def match_text_to_mask(
     debug_rows = []
 
     for idx, (moji, quad) in enumerate(zip(all_mojis, all_boxes), start=1):
-        text_mask = _poly_to_mask(quad, h, w)
-        text_area = int(text_mask.sum())
+        bbox = _poly_bbox_clipped(quad, h, w)
+        text_mask_local = _poly_to_local_mask(quad, bbox) if bbox is not None else None
+        text_area = int(text_mask_local.sum()) if text_mask_local is not None else 0
 
         if text_area <= 0:
             debug_rows.append({
@@ -217,6 +220,9 @@ def match_text_to_mask(
             })
             continue
 
+        x0, y0, x1, y1 = bbox
+        text_bool_local = text_mask_local > 0
+
         best_name = None
         best_iou = 0.0
         best_inter = 0
@@ -225,8 +231,15 @@ def match_text_to_mask(
 
         per_mask_scores = []
 
-        for name, sam_mask in zip(names, sam_masks):
-            iou, inter, union = _compute_iou(text_mask, sam_mask)
+        for name, sam_mask, sam_area in zip(names, sam_masks, sam_areas):
+            sam_local = sam_mask[y0 : y1 + 1, x0 : x1 + 1] > 0
+            inter = int(np.count_nonzero(text_bool_local & sam_local))
+            if inter == 0:
+                iou = 0.0
+                union = text_area + sam_area
+            else:
+                union = text_area + sam_area - inter
+                iou = float(inter / union) if union > 0 else 0.0
             text_cover = float(inter / text_area) if text_area > 0 else 0.0
 
             per_mask_scores.append({

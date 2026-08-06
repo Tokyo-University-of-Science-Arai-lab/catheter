@@ -6,8 +6,11 @@ from pathlib import Path
 from detection.pro_handbook.sam3_runtime.integration_service_manager import (
     Sam3ServiceSession,
 )
-from detection.pro_handbook.sam_py_demo.get_book_points_no_mask_merge_no_side_filter import (
-    run_capture_and_pca_no_mask_merge_no_side_filter,
+from detection.pro_handbook.sam_py_demo.get_book_points_sam3_refined_sam2_width_persistent_camera import (
+    run_capture_and_pca_sam3_refined_sam2_width_persistent_camera,
+)
+from detection.pro_handbook.sam_py_demo.modules.realsense_persistent_session import (
+    RealSensePersistentSession,
 )
 from xarm7.control.move_to_container_test import Move_to_Container
 from xarm7.control.shelf_id_manager import ShelfIDManager
@@ -49,6 +52,10 @@ CONFIG_PATH = SCRIPT_DIR / "Retrieval_integration.yaml"
 # 4回すべて失敗した場合は、その本を失敗扱いにして次の本へ進む。
 MAX_CURRENT_INSERT_ATTEMPTS = 4
 
+# 画像認識の最大試行回数（初回 + 再撮影2回）
+# 3回すべて失敗した場合にだけ、初期姿勢へ戻して次の本へ進む。
+MAX_RECOGNITION_ATTEMPTS = 3
+
 LOG_HEADER = [
     "timestamp",
     "book_name",
@@ -68,6 +75,7 @@ LOG_HEADER = [
     "result",
     "shot_dir",
     "memo",
+    "recognition_time_sec",
 ]
 
 
@@ -184,12 +192,13 @@ def write_log(
     result,
     shot_dir,
     memo,
+    recognition_time_sec=None,
 ):
     """retrieval_log.odsへ出庫結果を1行追記する。"""
 
     log_file = _resolve_config_relative_path(
         config,
-        config["paths"]["log"]["retrieval_ods"],
+        config["paths"]["log"]["retrieval"],
     )
 
     if not log_file.exists():
@@ -201,11 +210,12 @@ def write_log(
         estimated_book_width_mm,
         master_book_width_mm,
     )
+    recognition_time = _optional_float(recognition_time_sec)
 
     camera_xyz = _xyz_csv_values(camera_point_mm)
     robot_xyz = _xyz_csv_values(robot_point_mm)
 
-    # 現在のCSVと同じ18列
+    # 既存18列の末尾に認識時間を追加した19列
     row = [
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         book_name,
@@ -221,6 +231,7 @@ def write_log(
         result,
         _short_shot_dir(shot_dir),
         "" if memo is None else str(memo),
+        _csv_value(recognition_time),
     ]
 
     # ODSを開く
@@ -252,7 +263,7 @@ def write_log(
 
     required_columns = len(LOG_HEADER)
 
-    # 18列未満なら列を追加
+    # 必要列数未満なら列を追加
     if sheet.ncols() < required_columns:
         sheet.append_columns(
             required_columns - sheet.ncols()
@@ -274,6 +285,12 @@ def write_log(
     ):
         for col, header in enumerate(LOG_HEADER):
             sheet[0, col].set_value(header)
+    else:
+        # 既存ODSへ列を追加した場合は、空の新規ヘッダだけを補完する。
+        for col, header in enumerate(LOG_HEADER):
+            value = sheet[0, col].value
+            if value is None or str(value).strip() == "":
+                sheet[0, col].set_value(header)
 
     # 最後のデータ行の次を取得
     target_row = _find_next_ods_row(
@@ -287,7 +304,7 @@ def write_log(
             target_row - sheet.nrows() + 1
         )
 
-    # 18列を書き込む
+    # 全列を書き込む
     for col, value in enumerate(row):
         sheet[target_row, col].set_value(
             _ods_safe_value(value)
@@ -306,6 +323,7 @@ def write_log(
     )
     print(f"[ODS LOG] camera XYZ [mm]: {camera_xyz}")
     print(f"[ODS LOG] robot XYZ [mm]: {robot_xyz}")
+    print(f"[ODS LOG] recognition time [sec]: {recognition_time}")
 
 def load_config(config_path):
     config_path = Path(config_path).expanduser().resolve()
@@ -329,6 +347,12 @@ def sigint_handler(sig, frame):
             service_session.stop_if_owned()
         except Exception as e:
             print(f"[SAM3] owned service cleanup failed: {e}")
+    camera_session = globals().get("_realsense_camera_session")
+    if camera_session is not None:
+        try:
+            camera_session.stop()
+        except Exception as e:
+            print(f"[CAMERA] persistent cleanup failed: {e}")
     os._exit(1)
 
 signal.signal(signal.SIGINT, sigint_handler)
@@ -360,6 +384,7 @@ def main_sequence(
     shelf_manager: ShelfIDManager,
     monitor: XArmMonitor,
     done_pub,
+    camera_session: RealSensePersistentSession,
 ):
 
     runtime_log = {
@@ -369,6 +394,8 @@ def main_sequence(
         "robot_point_mm": None,
         "shot_dir": None,
         "insert_attempt": 0,
+        "recognition_attempt": 0,
+        "recognition_time_sec": None,
         "safe_stop_logged": False,
         "error_logged": False,
     }
@@ -381,22 +408,19 @@ def main_sequence(
     book_width = None
     HandMotors_retrieval = None
     successful_insert_attempt = None
+    successful_recognition_attempt = None
     
     try:
         print('start sequence')
         shelf_manager.received = False
         waypoint_node.reset()
         # ==============================
-        # shelf_id 取得（YAML設定優先、なければトピック待ち）
+        # shelf_id 受信待ち
         # ==============================
-        yaml_shelf_id = config.get("shelf_id")
-        if yaml_shelf_id:
-            node.get_logger().info(f"Using shelf_id from config: {yaml_shelf_id}")
-            shelf_manager.set_from_string(str(yaml_shelf_id))
-        else:
-            node.get_logger().info("Waiting for /shelf_id ...")
-            while rclpy.ok() and not shelf_manager.is_received():
-                executor.spin_once(timeout_sec=0.1)
+        node.get_logger().info("Waiting for /shelf_id ...")
+
+        while rclpy.ok() and not shelf_manager.is_received():
+            executor.spin_once(timeout_sec=0.1)
 
         side = shelf_manager.get_side()
         height = shelf_manager.get_height()
@@ -424,6 +448,9 @@ def main_sequence(
                     result="safe_stop",
                     shot_dir=runtime_log["shot_dir"],
                     memo=msg,
+                    recognition_time_sec=runtime_log[
+                        "recognition_time_sec"
+                    ],
                 )
                 runtime_log["safe_stop_logged"] = True
                 runtime_log["error_logged"] = True
@@ -538,9 +565,7 @@ def main_sequence(
 
         # ==============================
         # init → capture 姿勢へ（Waypoint）
-        # AMR不使用のため trigger_goal() で直接起動
-        node.get_logger().info("Triggering waypoint directly (AMR not used)")
-        waypoint_node.trigger_goal()
+        node.get_logger().info("Waiting for manual /navigation_goal_final")
 
         while rclpy.ok() and not waypoint_node.is_finished():
             executor.spin_once(timeout_sec=0.1)
@@ -572,123 +597,199 @@ def main_sequence(
                 )
                 time.sleep(1.0)
 
-                # 前回の認識結果を残さない
-                runtime_log["roll_deg"] = None
-                runtime_log["estimated_book_width_mm"] = None
-                runtime_log["camera_point_mm"] = None
-                runtime_log["robot_point_mm"] = None
-                runtime_log["shot_dir"] = None
-
                 # ================== 認識 ==================
-                print("認識開始")
-                start = time.perf_counter()
+                # 認識エラー時は撮影姿勢を維持したまま再撮影し、
+                # 初回を含めて最大3回まで認識する。
+                successful_recognition_attempt = None
 
-                try:
-                    roll, p_xmax, book_width, shot_dir = (
-                        run_capture_and_pca_no_mask_merge_no_side_filter(
-                            query=book_name,
-                            sam_device="gpu",
-                        )
-                    )
+                for recognition_attempt in range(
+                    1,
+                    MAX_RECOGNITION_ATTEMPTS + 1,
+                ):
+                    runtime_log["recognition_attempt"] = recognition_attempt
 
-                    shot_dir = Path(shot_dir)
-
-                    runtime_log["roll_deg"] = float(np.degrees(roll))
-                    runtime_log["estimated_book_width_mm"] = float(book_width)
-                    runtime_log["shot_dir"] = shot_dir
+                    # 前回の認識結果を次の試行へ持ち越さない。
+                    roll = None
+                    p_xmax = None
+                    book_width = None
+                    shot_dir = None
+                    runtime_log["roll_deg"] = None
+                    runtime_log["estimated_book_width_mm"] = None
+                    runtime_log["camera_point_mm"] = None
+                    runtime_log["robot_point_mm"] = None
+                    runtime_log["shot_dir"] = None
+                    runtime_log["recognition_time_sec"] = None
 
                     print(
-                        f"""
-                        ===== PCA RESULT =====
-                        roll        : {roll}
-                        p_xmax      : {p_xmax}
-                        book_width  : {book_width}
-                        ======================
-                        """
+                        "[RECOGNITION] capture/recognition attempt "
+                        f"{recognition_attempt}/"
+                        f"{MAX_RECOGNITION_ATTEMPTS}"
                     )
+                    start = time.perf_counter()
 
-                    if p_xmax is None:
-                        raise RuntimeError(
-                            "Recognition failed: p_xmax is None"
+                    try:
+                        # この関数を呼ぶたびに新しく撮影・認識する。
+                        roll, p_xmax, book_width, shot_dir = (
+                            run_capture_and_pca_sam3_refined_sam2_width_persistent_camera(
+                                query=book_name,
+                                sam_device="gpu",
+                                camera_session=camera_session,
+                            )
                         )
 
-                    # p_xmaxはカメラ座標系[m]。ログでは[mm]にする。
-                    runtime_log["camera_point_mm"] = (
-                        np.asarray(
-                            p_xmax,
-                            dtype=np.float64,
-                        ).reshape(3)
-                        * 1000.0
-                    )
+                        shot_dir = Path(shot_dir)
 
-                except Exception as e:
-                    print(
-                        f" recognition failed -> "
-                        f"skip this book: {e}"
-                    )
-                    write_log(
-                        config=config,
-                        book_name=book_name,
-                        shelf_id=shelf_id,
-                        roll_deg=runtime_log["roll_deg"],
-                        estimated_book_width_mm=runtime_log[
-                            "estimated_book_width_mm"
-                        ],
-                        master_book_width_mm=master_book_width_mm,
-                        camera_point_mm=runtime_log[
-                            "camera_point_mm"
-                        ],
-                        robot_point_mm=runtime_log[
-                            "robot_point_mm"
-                        ],
-                        side=side,
-                        height=height,
-                        result="recognition_fail",
-                        shot_dir=runtime_log["shot_dir"],
-                        memo=(
-                            f"attempt={insert_attempt}/"
-                            f"{MAX_CURRENT_INSERT_ATTEMPTS}; "
-                            f"retry_count={max(0, insert_attempt - 1)}; "
-                            f"{type(e).__name__}: {e}"
-                        ),
-                    )
-                    traceback.print_exc()
+                        runtime_log["roll_deg"] = float(
+                            np.degrees(roll)
+                        )
+                        runtime_log["estimated_book_width_mm"] = float(
+                            book_width
+                        )
+                        runtime_log["shot_dir"] = shot_dir
 
-                    # 認識失敗時はコンテナ収納へ進まず、
-                    # 初期姿勢へ戻して次の本へ進む。
-                    tp.publish_target_mm(
-                        config["linear_lift"]["home_mm"]
-                    )
-                    rclpy.spin_once(tp, timeout_sec=0.1)
-
-                    waypoint_node.reset()
-                    waypoint_path = config["paths"]["waypoint"][
-                        "capture_to_init"
-                    ][side]
-                    waypoint_node.play_direct(waypoint_path)
-
-                    while (
-                        rclpy.ok()
-                        and not waypoint_node.is_finished()
-                    ):
-                        executor.spin_once(timeout_sec=0.1)
-
-                    if waypoint_node.is_failed():
-                        raise RuntimeError(
-                            "認識失敗後の初期姿勢復帰に失敗: "
-                            f"{waypoint_node.error_message()}"
+                        print(
+                            f"""
+                            ===== PCA RESULT =====
+                            roll        : {roll}
+                            p_xmax      : {p_xmax}
+                            book_width  : {book_width}
+                            ======================
+                            """
                         )
 
-                    shelf_manager.received = False
+                        if p_xmax is None:
+                            raise RuntimeError(
+                                "Recognition failed: p_xmax is None"
+                            )
 
-                    done_msg = Bool()
-                    done_msg.data = True
-                    done_pub.publish(done_msg)
-                    rclpy.spin_once(node, timeout_sec=0.1)
-                    return 0.0
+                        # p_xmaxはカメラ座標系[m]。ログでは[mm]にする。
+                        runtime_log["camera_point_mm"] = (
+                            np.asarray(
+                                p_xmax,
+                                dtype=np.float64,
+                            ).reshape(3)
+                            * 1000.0
+                        )
+
+                        successful_recognition_attempt = (
+                            recognition_attempt
+                        )
+                        print(
+                            "[RECOGNITION] succeeded: "
+                            f"attempt={recognition_attempt}/"
+                            f"{MAX_RECOGNITION_ATTEMPTS}"
+                        )
+                        break
+
+                    except Exception as e:
+                        runtime_log["recognition_time_sec"] = float(
+                            time.perf_counter() - start
+                        )
+                        is_last_recognition_attempt = (
+                            recognition_attempt
+                            >= MAX_RECOGNITION_ATTEMPTS
+                        )
+                        recognition_result = (
+                            "recognition_fail"
+                            if is_last_recognition_attempt
+                            else "recognition_retry"
+                        )
+                        next_action = (
+                            "return to init and skip this book"
+                            if is_last_recognition_attempt
+                            else "recapture and retry recognition"
+                        )
+
+                        print(
+                            "[RECOGNITION] failed: "
+                            f"attempt={recognition_attempt}/"
+                            f"{MAX_RECOGNITION_ATTEMPTS}; "
+                            f"next={next_action}; error={e}"
+                        )
+
+                        write_log(
+                            config=config,
+                            book_name=book_name,
+                            shelf_id=shelf_id,
+                            roll_deg=runtime_log["roll_deg"],
+                            estimated_book_width_mm=runtime_log[
+                                "estimated_book_width_mm"
+                            ],
+                            master_book_width_mm=master_book_width_mm,
+                            camera_point_mm=runtime_log[
+                                "camera_point_mm"
+                            ],
+                            robot_point_mm=runtime_log[
+                                "robot_point_mm"
+                            ],
+                            side=side,
+                            height=height,
+                            result=recognition_result,
+                            shot_dir=runtime_log["shot_dir"],
+                            memo=(
+                                f"insert_attempt={insert_attempt}/"
+                                f"{MAX_CURRENT_INSERT_ATTEMPTS}; "
+                                f"recognition_attempt="
+                                f"{recognition_attempt}/"
+                                f"{MAX_RECOGNITION_ATTEMPTS}; "
+                                f"recognition_fail_count="
+                                f"{recognition_attempt}; "
+                                f"next_action={next_action}; "
+                                f"{type(e).__name__}: {e}"
+                            ),
+                            recognition_time_sec=runtime_log[
+                                "recognition_time_sec"
+                            ],
+                        )
+                        traceback.print_exc()
+
+                        if not is_last_recognition_attempt:
+                            print(
+                                "[RECOGNITION RETRY] "
+                                "撮影姿勢のまま再撮影します。"
+                            )
+                            time.sleep(1.0)
+                            continue
+
+                        # 3回すべて認識失敗した場合だけ、
+                        # 初期姿勢へ戻して次の本へ進む。
+                        tp.publish_target_mm(
+                            config["linear_lift"]["home_mm"]
+                        )
+                        rclpy.spin_once(tp, timeout_sec=0.1)
+
+                        waypoint_node.reset()
+                        waypoint_path = config["paths"]["waypoint"][
+                            "capture_to_init"
+                        ][side]
+                        waypoint_node.play_direct(waypoint_path)
+
+                        while (
+                            rclpy.ok()
+                            and not waypoint_node.is_finished()
+                        ):
+                            executor.spin_once(timeout_sec=0.1)
+
+                        if waypoint_node.is_failed():
+                            raise RuntimeError(
+                                "認識3回失敗後の初期姿勢復帰に失敗: "
+                                f"{waypoint_node.error_message()}"
+                            )
+
+                        shelf_manager.received = False
+
+                        done_msg = Bool()
+                        done_msg.data = True
+                        done_pub.publish(done_msg)
+                        rclpy.spin_once(node, timeout_sec=0.1)
+                        return 0.0
 
                 end = time.perf_counter()
-                print(f"{end - start} sec.")
+                recognition_time_sec = float(end - start)
+                runtime_log["recognition_time_sec"] = (
+                    recognition_time_sec
+                )
+                print(f"{recognition_time_sec} sec.")
 
                 print("roll (deg) =", np.degrees(roll))
 
@@ -826,6 +927,9 @@ def main_sequence(
                                 result=retry_result,
                                 shot_dir=runtime_log["shot_dir"],
                                 memo=retry_memo,
+                                recognition_time_sec=runtime_log[
+                                    "recognition_time_sec"
+                                ],
                             )
                             print(
                                 "[ODS RETRY LOG] "
@@ -1031,6 +1135,9 @@ def main_sequence(
                 result="ctrl+d",
                 shot_dir=runtime_log["shot_dir"],
                 memo=memo,
+                recognition_time_sec=runtime_log[
+                    "recognition_time_sec"
+                ],
             )
             rclpy.spin_once(tp, timeout_sec=0.1)
 
@@ -1061,6 +1168,9 @@ def main_sequence(
                     result="motion_error",
                     shot_dir=runtime_log["shot_dir"],
                     memo=f"{type(e).__name__}: {e}",
+                    recognition_time_sec=runtime_log[
+                        "recognition_time_sec"
+                    ],
                 )
                 runtime_log["error_logged"] = True
             raise
@@ -1090,10 +1200,22 @@ def main_sequence(
                 int(runtime_log.get("insert_attempt", 1)),
             )
 
+        if successful_recognition_attempt is None:
+            successful_recognition_attempt = max(
+                1,
+                int(runtime_log.get("recognition_attempt", 1)),
+            )
+
         memo = (
-            f"attempt={successful_insert_attempt}/"
+            f"insert_attempt={successful_insert_attempt}/"
             f"{MAX_CURRENT_INSERT_ATTEMPTS}; "
-            f"retry_count={max(0, successful_insert_attempt - 1)}; "
+            f"insert_retry_count="
+            f"{max(0, successful_insert_attempt - 1)}; "
+            f"recognition_attempt="
+            f"{successful_recognition_attempt}/"
+            f"{MAX_RECOGNITION_ATTEMPTS}; "
+            f"recognition_retry_count="
+            f"{max(0, successful_recognition_attempt - 1)}; "
             f"barcode_result={barcode_result}; "
             "barcode_bypass=true"
         )
@@ -1113,6 +1235,9 @@ def main_sequence(
             result="success",
             shot_dir=runtime_log["shot_dir"],
             memo=memo,
+            recognition_time_sec=runtime_log[
+                "recognition_time_sec"
+            ],
         )
         print('sequence done')
 
@@ -1146,6 +1271,9 @@ def main_sequence(
                     result="fatal_error",
                     shot_dir=runtime_log["shot_dir"],
                     memo=f"{type(e).__name__}: {e}",
+                    recognition_time_sec=runtime_log[
+                        "recognition_time_sec"
+                    ],
                 )
             except Exception as log_exc:
                 print(f"[CSV LOG ERROR] fatal logging failed: {log_exc}")
@@ -1161,7 +1289,7 @@ def main_sequence(
         os.kill(os.getpid(), signal.SIGINT)
         return None
         
-def main():
+def main(camera_session: RealSensePersistentSession):
     config = load_config(CONFIG_PATH)
     print(f"[CONFIG] loaded: {config['_config_path']}")
     print(
@@ -1215,7 +1343,7 @@ def main():
         arm=arm,
         monitor=monitor,
         yaml_path=config["paths"]["waypoint"]["init_to_capture"],
-        speed=0.7,
+        speed=1.0,
         accel=1.0,
     )
 
@@ -1244,6 +1372,7 @@ def main():
                 waypoint_node=waypoint_node,   
                 shelf_manager=waypoint_node.shelf_manager,
                 done_pub=done_pub,
+                camera_session=camera_session,
             )
 
             if retrieved_book_width is None:
@@ -1282,6 +1411,11 @@ def main():
 
 
 if __name__ == '__main__':
-    _sam3_service_session = Sam3ServiceSession()
-    with _sam3_service_session:
-        main()
+    _realsense_camera_session = RealSensePersistentSession()
+    try:
+        _realsense_camera_session.start()
+        _sam3_service_session = Sam3ServiceSession()
+        with _sam3_service_session:
+            main(camera_session=_realsense_camera_session)
+    finally:
+        _realsense_camera_session.stop()

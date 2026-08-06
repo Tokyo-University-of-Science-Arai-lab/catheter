@@ -167,16 +167,16 @@ PLACING_FOR_TEST_Q = [
 DISTANCE_BOOKSHELF = np.radians(60.0)
 INSERT_CONTAINER = -330
 
-TCP_VEL_1 = 200
-TCP_ACC_1 = 200
+TCP_VEL_1 = 70
+TCP_ACC_1 = 100
 
-TCP_VEL_2 = 40
+TCP_VEL_2 = 28
 TCP_ACC_2 = 40
 
 # J_VEL_0 = 1.0
 # J_ACC_0 = 1.0
 
-J_VEL_1 = 1.0
+J_VEL_1 = 0.7
 J_ACC_1 = 2.0
 
 # defined position for retrieval

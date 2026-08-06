@@ -13,6 +13,7 @@ import numpy as np
 from . import get_book_points_no_mask_merge_no_side_filter as stable
 from .get_book_points_sam3_refined_median_depth import (
     CAPTURES_DIR,
+    prepare_offline_shot,
     run_capture_and_pca_offline_sam3_refined_median_depth,
 )
 from .modules.sam2_compatible_geometry import estimate_sam2_compatible_geometry
@@ -54,8 +55,18 @@ def run_capture_and_pca_offline_sam3_refined_sam2_width(
     intr=None,
     depth_scale=None,
     depth_merge_tolerance_raw=30,
+    prepared=None,
+    ocr_session=None,
 ):
-    """Run current refine-only recognition, replacing only its returned width."""
+    """Run current refine-only recognition, replacing only its returned width.
+
+    prepared には prepare_offline_shot() の戻り値を渡せる。同じ画像を複数の
+    query で評価するとき、query に依存しない OCR と SAM3 マスク生成を省く。
+
+    ocr_session には ocr_worker_session.OcrWorkerSession を渡せる。使い捨て
+    OCRサブプロセスの代わりに常駐workerでモデルを使い回す
+    （prepared 経由で使い回すときは無関係）。
+    """
     shot_dir = Path(shot_dir).expanduser().resolve()
     base = run_capture_and_pca_offline_sam3_refined_median_depth(
         query,
@@ -65,6 +76,8 @@ def run_capture_and_pca_offline_sam3_refined_sam2_width(
         intr=intr,
         depth_scale=depth_scale,
         depth_merge_tolerance_raw=depth_merge_tolerance_raw,
+        prepared=prepared,
+        ocr_session=ocr_session,
     )
 
     mask_path = shot_dir / "selected_mask_refined.png"

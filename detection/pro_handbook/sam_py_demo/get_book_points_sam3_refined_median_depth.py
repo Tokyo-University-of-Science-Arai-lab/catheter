@@ -78,6 +78,176 @@ def _save_depth_visualization(path: Path, depth, mask=None) -> None:
     cv2.imwrite(str(path), colored)
 
 
+# query に依存しない中間生成物。同じ画像に対しては常に同じ内容になるので、
+# 画像1枚につき1回だけ作り、各trialのフォルダへコピーして使い回す。
+QUERY_INDEPENDENT_ARTIFACTS = (
+    "camera_params.json",
+    "after_init_depth_raw.npy",
+    "depth_raw_visualization.png",
+    "ocr_result.json",
+    "ocr_overlay.png",
+    "ocr_runtime_info.json",
+    "sam3_service_masks.npz",
+    "sam3_all_masks_overlay.png",
+    "sam3_service_inference.json",
+)
+
+OFFLINE_INPUT_FILES = ("after_init_rgb.png", "after_init_depth.npy")
+
+
+def _load_offline_rgbd(shot_dir: Path):
+    color_np = cv2.imread(str(shot_dir / "after_init_rgb.png"), cv2.IMREAD_COLOR)
+    depth_raw = np.load(shot_dir / "after_init_depth.npy", allow_pickle=False)
+    if color_np is None:
+        raise FileNotFoundError(shot_dir / "after_init_rgb.png")
+    if depth_raw.shape != color_np.shape[:2]:
+        raise ValueError(f"RGB/depth shape mismatch: {color_np.shape}/{depth_raw.shape}")
+    return color_np, depth_raw
+
+
+def _input_digests(shot_dir: Path) -> dict:
+    return {name: _sha256(shot_dir / name) for name in OFFLINE_INPUT_FILES}
+
+
+def _run_query_independent_stage(
+    *,
+    shot_dir: Path,
+    color_np,
+    depth_raw,
+    intr,
+    depth_scale,
+    sam_device,
+    depth_merge_tolerance_raw,
+    ocr_session=None,
+):
+    """OCR と SAM3 マスク生成。どちらも query を見ないので画像ごとに1回でよい。
+
+    ocr_session に ocr_worker_session.OcrWorkerSession を渡すと、
+    使い捨てのOCRサブプロセス（呼び出しごとにモデルを作り直す）ではなく、
+    常駐workerでモデルを使い回す。None（既定）なら従来どおり。
+    """
+    current._save_camera_params_json(shot_dir, intr, depth_scale)
+    np.save(shot_dir / "after_init_depth_raw.npy", depth_raw)
+    _save_depth_visualization(shot_dir / "depth_raw_visualization.png", depth_raw)
+
+    if ocr_session is None:
+        ocr_proc = current.start_ocr_subprocess(shot_dir)
+        print(f"[PARALLEL][{VARIANT}] OCR subprocess started")
+    else:
+        ocr_shot_dir = ocr_session.start(shot_dir)
+        print(f"[PARALLEL][{VARIANT}] OCR sent to resident worker")
+    runner = current._get_sam_runner_compat(
+        encoder_path="unused-by-sam3",
+        decoder_path="unused-by-sam3",
+        sam_device=sam_device,
+        use_cache=True,
+    )
+    rgb_pil = Image.fromarray(cv2.cvtColor(color_np, cv2.COLOR_BGR2RGB))
+    masks, sam_data = current._infer_masks_compat(
+        runner,
+        rgb_pil,
+        current._make_stage_save_cfg_compat(shot_dir),
+        depth_np_u16=depth_raw,
+        depth_merge_tolerance_raw=depth_merge_tolerance_raw,
+    )
+    if ocr_session is None:
+        ocr_stdout = current.wait_ocr_subprocess(ocr_proc, timeout=120.0)
+        if ocr_stdout.strip():
+            print(ocr_stdout, end="" if ocr_stdout.endswith("\n") else "\n")
+    else:
+        ocr_session.wait(ocr_shot_dir, timeout=120.0)
+    return masks, sam_data
+
+
+def prepare_offline_shot(
+    shot_dir,
+    sam_device="gpu",
+    *,
+    intr=None,
+    depth_scale=None,
+    depth_merge_tolerance_raw=30,
+    ocr_session=None,
+):
+    """1枚の画像について query に依存しない処理だけを先に済ませる。
+
+    同じ画像を複数の query で評価するとき、戻り値を
+    run_capture_and_pca_offline_sam3_refined_*(..., prepared=...) に渡すと
+    OCR と SAM3 マスク生成が1回で済む。
+
+    ocr_session に ocr_worker_session.OcrWorkerSession を渡すと、
+    使い捨てOCRサブプロセスの代わりに常駐workerでモデルを使い回す。
+    """
+    shot_dir = Path(shot_dir).expanduser().resolve()
+    color_np, depth_raw = _load_offline_rgbd(shot_dir)
+    if intr is None or depth_scale is None:
+        intr, depth_scale = stable._intrinsics()
+
+    started = time.perf_counter()
+    masks, sam_data = _run_query_independent_stage(
+        shot_dir=shot_dir,
+        color_np=color_np,
+        depth_raw=depth_raw,
+        intr=intr,
+        depth_scale=depth_scale,
+        sam_device=sam_device,
+        depth_merge_tolerance_raw=depth_merge_tolerance_raw,
+        ocr_session=ocr_session,
+    )
+    prepared = {
+        "prepared_shot_dir": str(shot_dir),
+        "masks": masks,
+        "sam_data": sam_data,
+        "intr": intr,
+        "depth_scale": float(depth_scale),
+        "depth_merge_tolerance_raw": int(depth_merge_tolerance_raw),
+        "sam_device": sam_device,
+        "mask_count": len(masks),
+        "input_digests": _input_digests(shot_dir),
+        "prepare_seconds": float(time.perf_counter() - started),
+    }
+    _write_json(
+        shot_dir / "prepared_shot.json",
+        {key: value for key, value in prepared.items() if key not in {"masks", "sam_data", "intr"}},
+    )
+    return prepared
+
+
+def _reuse_prepared_shot(prepared: dict, shot_dir: Path):
+    """prepare_offline_shot() の生成物を trial のフォルダへコピーして使い回す。"""
+    source_dir = Path(prepared["prepared_shot_dir"])
+    if source_dir == shot_dir:
+        return list(prepared["masks"]), prepared["sam_data"]
+
+    digests = _input_digests(shot_dir)
+    if digests != prepared["input_digests"]:
+        raise ValueError(
+            "prepared shot does not match this shot_dir's RGB-D input; "
+            f"expected {prepared['input_digests']}, got {digests}"
+        )
+
+    copied = []
+    for name in QUERY_INDEPENDENT_ARTIFACTS:
+        src = source_dir / name
+        if src.exists():
+            shutil.copy2(src, shot_dir / name)
+            copied.append(name)
+    _write_json(
+        shot_dir / "prepared_shot_reuse.json",
+        {
+            "prepared_shot_dir": str(source_dir),
+            "copied_artifacts": copied,
+            "mask_count": int(prepared["mask_count"]),
+            "input_digests": digests,
+            "note": "OCR and SAM3 mask generation were run once for this image and reused",
+        },
+    )
+    print(
+        f"[PREPARED][{VARIANT}] reuse OCR/SAM3 artifacts from {source_dir} "
+        f"({len(copied)} files, {prepared['mask_count']} masks)"
+    )
+    return list(prepared["masks"]), prepared["sam_data"]
+
+
 def _representative_depth(
     depth_raw: np.ndarray,
     final_mask: np.ndarray,
@@ -321,11 +491,24 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
     intr=None,
     depth_scale=None,
     depth_merge_tolerance_raw=30,
+    prepared=None,
+    ocr_session=None,
 ):
-    """Run one comparison mode on an existing RGB-D directory."""
+    """Run one comparison mode on an existing RGB-D directory.
+
+    prepared に prepare_offline_shot() の戻り値を渡すと、query に依存しない
+    OCR と SAM3 マスク生成を省き、その生成物をコピーして使い回す。
+    None（既定）なら従来どおり毎回すべて計算する。
+
+    ocr_session に ocr_worker_session.OcrWorkerSession を渡すと、
+    使い捨てOCRサブプロセスの代わりに常駐workerでモデルを使い回す
+    （prepared 経由で使い回すときは無関係）。
+    """
     if mode not in MODES:
         raise ValueError(f"unsupported mode {mode!r}; expected one of {sorted(MODES)}")
     if mode == "baseline":
+        if prepared is not None:
+            raise ValueError("baseline mode does not support prepared shot reuse")
         return stable.run_capture_and_pca_offline_no_mask_merge_no_side_filter(
             query,
             shot_dir,
@@ -337,37 +520,28 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
 
     started = time.perf_counter()
     shot_dir = Path(shot_dir).expanduser().resolve()
-    color_np = cv2.imread(str(shot_dir / "after_init_rgb.png"), cv2.IMREAD_COLOR)
-    depth_raw = np.load(shot_dir / "after_init_depth.npy", allow_pickle=False)
-    if color_np is None:
-        raise FileNotFoundError(shot_dir / "after_init_rgb.png")
-    if depth_raw.shape != color_np.shape[:2]:
-        raise ValueError(f"RGB/depth shape mismatch: {color_np.shape}/{depth_raw.shape}")
+    color_np, depth_raw = _load_offline_rgbd(shot_dir)
+    if prepared is not None:
+        if intr is None:
+            intr = prepared["intr"]
+        if depth_scale is None:
+            depth_scale = prepared["depth_scale"]
     if intr is None or depth_scale is None:
         intr, depth_scale = stable._intrinsics()
-    current._save_camera_params_json(shot_dir, intr, depth_scale)
-    np.save(shot_dir / "after_init_depth_raw.npy", depth_raw)
-    _save_depth_visualization(shot_dir / "depth_raw_visualization.png", depth_raw)
 
-    ocr_proc = current.start_ocr_subprocess(shot_dir)
-    print(f"[PARALLEL][{VARIANT}] OCR subprocess started")
-    runner = current._get_sam_runner_compat(
-        encoder_path="unused-by-sam3",
-        decoder_path="unused-by-sam3",
-        sam_device=sam_device,
-        use_cache=True,
-    )
-    rgb_pil = Image.fromarray(cv2.cvtColor(color_np, cv2.COLOR_BGR2RGB))
-    masks, sam_data = current._infer_masks_compat(
-        runner,
-        rgb_pil,
-        current._make_stage_save_cfg_compat(shot_dir),
-        depth_np_u16=depth_raw,
-        depth_merge_tolerance_raw=depth_merge_tolerance_raw,
-    )
-    ocr_stdout = current.wait_ocr_subprocess(ocr_proc, timeout=120.0)
-    if ocr_stdout.strip():
-        print(ocr_stdout, end="" if ocr_stdout.endswith("\n") else "\n")
+    if prepared is None:
+        masks, sam_data = _run_query_independent_stage(
+            shot_dir=shot_dir,
+            color_np=color_np,
+            depth_raw=depth_raw,
+            intr=intr,
+            depth_scale=depth_scale,
+            sam_device=sam_device,
+            depth_merge_tolerance_raw=depth_merge_tolerance_raw,
+            ocr_session=ocr_session,
+        )
+    else:
+        masks, sam_data = _reuse_prepared_shot(prepared, shot_dir)
     merged = current.merge_ocr_and_masks(
         query=query, masks=masks, shot_dir=shot_dir, interactive=False, threshold=40
     )
@@ -463,6 +637,7 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
         "mask_refinement": refinement,
         **{key: value for key, value in compute.items() if key != "final_depth"},
         "processing_seconds": float(time.perf_counter() - started),
+        "prepared_shot_reused": prepared is not None,
         "returned_shot_dir": str(shot_dir),
     }
     _write_json(shot_dir / "offline_recognition_result.json", result)

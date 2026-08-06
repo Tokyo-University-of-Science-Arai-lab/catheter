@@ -27,6 +27,7 @@ DEFAULT_PARAMETERS = {
     "max_axis_change_deg": 5.0,
     "min_final_area_px": 200,
     "min_valid_depth_count": 30,
+    "max_ocr_mask_axis_disagreement_deg": 15.0,
 }
 
 
@@ -197,6 +198,29 @@ def refine_selected_sam3_mask(
         anchor_id = max(component_ids, key=lambda cid: stats[cid, cv2.CC_STAT_AREA])
 
     anchor = labels == anchor_id
+
+    # The OCR-polygon axis comes from a handful of text corner points and can
+    # be numerically unstable (near-square text quad, short/rotated text,
+    # matched text that doesn't span the box). These boxes are strongly
+    # elongated, so the anchor mask's own PCA axis is a far more reliable
+    # orientation estimate. When the two disagree by roughly more than a
+    # right angle's worth, trust the mask: this is what catches the axis
+    # flipping ~90 degrees and measuring the box's length as its width.
+    axis_disagreement_deg = None
+    if axis is not None:
+        anchor_ys, anchor_xs = np.where(anchor)
+        mask_axis = _axis_from_points(np.column_stack([anchor_xs, anchor_ys]))
+        if mask_axis is not None:
+            axis_disagreement_deg = _undirected_angle_difference_deg(
+                math.atan2(axis[1], axis[0]), math.atan2(mask_axis[1], mask_axis[0])
+            )
+            if (
+                axis_disagreement_deg is not None
+                and axis_disagreement_deg > params["max_ocr_mask_axis_disagreement_deg"]
+            ):
+                axis = mask_axis
+                axis_source = f"{axis_source}_overridden_by_anchor_mask_pca"
+
     if axis is None:
         ys, xs = np.where(anchor)
         axis = _axis_from_points(np.column_stack([xs, ys]))
@@ -382,6 +406,7 @@ def refine_selected_sam3_mask(
         "anchor_confident": anchor_confident,
         "axis_source": axis_source,
         "axis_uv": None if axis is None else axis.astype(float).tolist(),
+        "axis_disagreement_deg": axis_disagreement_deg,
         "kept_component_ids": [int(value) for value in kept],
         "removed_component_ids": [int(value) for value in removed],
         "raw_mask_area_px": raw_area,

@@ -1,0 +1,101 @@
+[
+  {
+    "book_name": "ESC0407",
+    "book_width": "17.5",
+    "_display_name": "TransForm",
+    "_model_number": "ESC0407",
+    "_width_in_master_20260216": "17.5",
+    "ISBN_number": "9784297118846",
+    "bookshelf_ID": "1-1-1-1"
+  },
+
+  {
+    "book_name": "612104",
+    "book_width": "17.0",
+    "_display_name": "Target XL",
+    "_model_number": "612104",
+    "_width_in_master_20260216": "17",
+    "ISBN_number": "9784627846913",
+    "bookshelf_ID": "1-1-1-1"
+  },
+
+  {
+    "book_name": "SSTD215STR",
+    "book_width": "19.6",
+    "_display_name": "Synchro SELECT",
+    "_model_number": "SSTD215STR",
+    "_width_in_master_20260216": "18.0",
+    "ISBN_number": "9784254209457",
+    "bookshelf_ID": "1-1-1-1"
+  },
+
+  {
+    "book_name": "XT275081",
+    "book_width": "17.7",
+    "_display_name": "Eccelsior® XT-27",
+    "_model_number": "XT275081",
+    "_width_in_master_20260216": "18",
+    "ISBN_number": "9784489020360",
+    "bookshelf_ID": "1-1-1-1"
+  },
+
+  {
+    "book_name": "FD45017",
+    "book_width": "19.1",
+    "_display_name": "Surpass Evolve",
+    "_model_number": "FD45017",
+    "_width_in_master_20260216": "19.0",
+    "ISBN_number": "9784130628051",
+    "bookshelf_ID": "1-1-1-1"
+  },
+
+  {
+    "book_name": "INC-11814-146",
+    "book_width": "22.2",
+    "_display_name": "AXS Vecta® 46",
+    "_model_number": "INC-11814-125 または INC-11814-146",
+    "_width_in_master_20260216": "22.8 (INC-11814-125 DAC) / 22.2 (INC-11814-146)",
+    "ISBN_number": "9784798068299",
+    "bookshelf_ID": "1-1-1-1"
+  },
+
+  {
+    "book_name": "MC1715000",
+    "book_width": "21.4",
+    "_display_name": "pNOVUS 17 150cm",
+    "_model_number": "MC1715000",
+    "_width_in_master_20260216": "21.0",
+    "ISBN_number": "9784798068299",
+    "bookshelf_ID": "1-1-1-1"
+  },
+
+  {
+    "book_name": "FG13160-0615-1S",
+    "book_width": "17.0",
+    "_display_name": "Phenom 160cm",
+    "_model_number": "FG13160-0615-1S",
+    "_width_in_master_20260216": "17.0",
+    "ISBN_number": "9784781908137",
+    "bookshelf_ID": "1-1-1-1"
+  },
+
+  {
+    "book_name": "MAT-110-110",
+    "book_width": "17.8",
+    "_display_name": "Medtronic Ripride",
+    "_model_number": "MAT-110-110",
+    "_width_in_master_20260216": "17.0",
+    "ISBN_number": "9784789016278",
+    "bookshelf_ID": "1-1-1-1"
+  },
+
+  {
+    "book_name": "M00345100950",
+    "book_width": "44.2",
+    "_display_name": "Strykerの厚いオレンジの箱",
+    "_model_number": "M00345100950",
+    "_width_in_master_20260216": "44.2",
+    "ISBN_number": "9784065218846",
+    "bookshelf_ID": "1-1-1-1"
+  }
+]

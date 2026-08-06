@@ -1,9 +1,27 @@
 #!/usr/bin/env python3
-"""Latest SAM3 book-width offline evaluator, based on offline_pointcloud_debug."""
+"""Latest SAM3 book-width offline evaluator, based on offline_pointcloud_debug.
+
+captures/100test/ に保存済みの100枚（1枚=1試行）を、現在のSAM3認識で処理する。
+既定値は 2026-07-08 に SAM2 で実施した100回試験と同じ構成に合わせてあり、
+その結果（captures/100test_offline/20260708_203730/）と直接比較できる。
+
+  対象品目     : master_100test.json の10品目
+  並び         : ラウンドロビン（1〜10 が1周目、11〜20 が2周目 … 計10周）
+  出力         : captures/100test_offline/SAM3_<timestamp>/
+
+撮り方が違うデータ（例: 1品目を5枚連続で撮ったもの）は --order block で扱える。
+
+使い方:
+  python offline_POINTCLOUD_DEBUG_SAM3.py                      # 100件すべて
+  python offline_POINTCLOUD_DEBUG_SAM3.py --case 1             # 1件だけ試す
+  python offline_POINTCLOUD_DEBUG_SAM3.py --start-case 1 --end-case 10
+  python offline_POINTCLOUD_DEBUG_SAM3.py --external-service   # 起動済みサービスを使う
+"""
 
 from detection.pro_handbook.sam_py_demo.get_book_points_sam3_refined_sam2_width import (
     run_capture_and_pca_offline_sam3_refined_sam2_width,
 )
+from detection.pro_handbook.sam_py_demo.ocr_worker_session import OcrWorkerSession
 from detection.pro_handbook.sam3_runtime.integration_service_manager import (
     Sam3ServiceSession,
 )
@@ -29,15 +47,22 @@ BASE_DIR = Path(__file__).resolve().parent
 # 元の入力データ
 TEST_BASE_DIR = BASE_DIR / "captures" / "100test"
 
-# offline実行結果の保存先
-OFFLINE_BASE_DIR = BASE_DIR / "captures"
+# offline実行結果の保存先。SAM2時代の結果と同じ場所に並べる。
+OFFLINE_BASE_DIR = BASE_DIR / "captures" / "100test_offline"
+RUN_DIR_PREFIX = "SAM3"
 
-MASTER_JSON = BASE_DIR / "master_20260216.json"
+# 100testの撮影に使った10品目。SAM2実施時の master_20260216.json を復元したもの。
+MASTER_JSON = BASE_DIR / "master_100test.json"
 
 SAM_DEVICE = "gpu"
 
 START_INDEX = 1
 END_INDEX = 100
+
+# test_index と master_index の対応。--order で切り替える。
+#   round-robin: 1周で全品目を1枚ずつ。100test はこれ。
+#   block      : 1品目を REPEATS_PER_BOOK 枚連続。
+ORDER = "round-robin"
 REPEATS_PER_BOOK = 5
 
 # 評価しきい値 [mm]
@@ -69,18 +94,18 @@ class Tee:
 
 def make_unique_run_dir(base_dir: Path, timestamp: str) -> Path:
     """
-    captures/offline_POINTCLOUD_DEBUG_SAM3_<timestamp> を作る。
+    captures/100test_offline/SAM3_<timestamp> を作る。
     同じ秒に複数回実行して重複した場合は _001, _002 ... を付ける。
     """
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    run_dir = base_dir / f"offline_POINTCLOUD_DEBUG_SAM3_{timestamp}"
+    run_dir = base_dir / f"{RUN_DIR_PREFIX}_{timestamp}"
     if not run_dir.exists():
         run_dir.mkdir(parents=True)
         return run_dir
 
     for i in range(1, 1000):
-        candidate = base_dir / f"offline_POINTCLOUD_DEBUG_SAM3_{timestamp}_{i:03d}"
+        candidate = base_dir / f"{RUN_DIR_PREFIX}_{timestamp}_{i:03d}"
         if not candidate.exists():
             candidate.mkdir(parents=True)
             return candidate
@@ -111,15 +136,28 @@ def load_master(master_json: Path):
 
 def get_book_info_for_test_index(master_books, test_index: int):
     """
-    1〜5     -> master[0]
-    6〜10    -> master[1]
-    ...
-    96〜100  -> master[19]
-    """
-    master_index = (test_index - 1) // REPEATS_PER_BOOK
-    repeat_index = (test_index - 1) % REPEATS_PER_BOOK + 1
+    ORDER="round-robin" （100test はこれ。10品目 × 10周）:
+      1〜10   -> master[0]〜master[9]  (ラウンド1)
+      11〜20  -> master[0]〜master[9]  (ラウンド2)
+      ...
 
-    if master_index < 0 or master_index >= len(master_books):
+    ORDER="block" （REPEATS_PER_BOOK=5 のとき）:
+      1〜5    -> master[0]
+      6〜10   -> master[1]
+      ...
+    """
+    n_books = len(master_books)
+
+    if ORDER == "round-robin":
+        master_index = (test_index - 1) % n_books
+        repeat_index = (test_index - 1) // n_books + 1
+    elif ORDER == "block":
+        master_index = (test_index - 1) // REPEATS_PER_BOOK
+        repeat_index = (test_index - 1) % REPEATS_PER_BOOK + 1
+    else:
+        raise ValueError(f"未知の ORDER です: {ORDER!r}")
+
+    if master_index < 0 or master_index >= n_books:
         raise IndexError(
             f"test_index={test_index} に対応する master_index={master_index} が存在しません。"
         )
@@ -231,6 +269,36 @@ def parse_args():
         action="store_true",
         help="require an already-ready service; do not start one",
     )
+    parser.add_argument(
+        "--master-json",
+        type=Path,
+        default=MASTER_JSON,
+        help=f"品目マスタ (default: {MASTER_JSON.name})",
+    )
+    parser.add_argument(
+        "--order",
+        choices=["round-robin", "block"],
+        default=ORDER,
+        help=f"test_index と品目の対応 (default: {ORDER})",
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=REPEATS_PER_BOOK,
+        help=f"--order block のときの1品目あたり枚数 (default: {REPEATS_PER_BOOK})",
+    )
+    parser.add_argument(
+        "--input-root",
+        type=Path,
+        default=TEST_BASE_DIR,
+        help=f"入力の撮影データ置き場 (default: {TEST_BASE_DIR})",
+    )
+    parser.add_argument(
+        "--out-root",
+        type=Path,
+        default=OFFLINE_BASE_DIR,
+        help=f"結果の保存先 (default: {OFFLINE_BASE_DIR})",
+    )
     return parser.parse_args()
 
 
@@ -246,12 +314,21 @@ def selected_range(args):
 
 
 def main():
+    global TEST_BASE_DIR, OFFLINE_BASE_DIR, MASTER_JSON, ORDER, REPEATS_PER_BOOK
+
     args = parse_args()
+    TEST_BASE_DIR = args.input_root
+    OFFLINE_BASE_DIR = args.out_root
+    MASTER_JSON = args.master_json
+    ORDER = args.order
+    REPEATS_PER_BOOK = args.repeats
+
     start_index, end_index = selected_range(args)
     print("\n===== BOOK WIDTH OFFLINE EVAL START =====")
     print(f"source test dir : {TEST_BASE_DIR}")
     print(f"offline base dir: {OFFLINE_BASE_DIR}")
     print(f"master json     : {MASTER_JSON}")
+    print(f"order           : {ORDER}")
     print(f"sam_device      : {SAM_DEVICE}")
     print(f"test range      : {start_index} to {end_index}")
     print("=========================================\n")
@@ -273,13 +350,14 @@ def main():
         "source_test_base_dir": str(TEST_BASE_DIR),
         "offline_base_dir": str(OFFLINE_BASE_DIR),
         "master_json": str(MASTER_JSON),
+        "order": ORDER,
         "sam_device": SAM_DEVICE,
         "start_index": start_index,
         "end_index": end_index,
         "repeats_per_book": REPEATS_PER_BOOK,
         "error_thresholds_mm": ERROR_THRESHOLDS_MM,
         "input_files": INPUT_FILES,
-        "output_structure": "captures/offline_POINTCLOUD_DEBUG_SAM3_<timestamp>/<test_index>/",
+        "output_structure": f"captures/100test_offline/{RUN_DIR_PREFIX}_<timestamp>/<test_index>/",
         "recognition_api": "run_capture_and_pca_offline_sam3_refined_sam2_width",
         "service_policy": "external only" if args.external_service else "reuse ready service, otherwise start and stop owned service",
     }
@@ -336,6 +414,14 @@ def main():
         + "\n",
         encoding="utf-8",
     )
+
+    # OCRを毎試行ごとに使い捨てサブプロセスで作り直すと、モデル生成だけで
+    # 1件あたり約2秒かかる（100件だと約3分）。バッチ全体で1つの常駐workerを
+    # 使い回し、モデルは最初の1回だけ作る。実機側の呼び出し
+    # （start_ocr_subprocess/wait_ocr_subprocess）はこのオフライン評価専用の
+    # 変更とは無関係で、従来どおり毎回作り直す。
+    ocr_session = OcrWorkerSession()
+    print(f"OCR常駐worker起動: pid={ocr_session.pid}")
 
     for test_index in range(start_index, end_index + 1):
         source_shot_dir = TEST_BASE_DIR / str(test_index)
@@ -397,6 +483,7 @@ def main():
                         query=book_name,
                         shot_dir=run_shot_dir.resolve(),
                         sam_device=SAM_DEVICE,
+                        ocr_session=ocr_session,
                     )
                     theta_rad = float(recognition["roll_rad"])
                     p_min = recognition["point_3d"]
@@ -505,6 +592,7 @@ def main():
     print(f"JSON    : {out_json}")
     print(f"SUMMARY : {out_summary}")
     print("=========================================\n")
+    ocr_session.stop()
     if not args.external_service:
         service_session.stop_if_owned()
 

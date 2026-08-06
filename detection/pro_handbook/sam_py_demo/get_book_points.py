@@ -47,10 +47,18 @@ from modules.book_width import estimate_book_width
 from modules.grip_point import find_target_point
 from modules.open3d_view import visualize_points_and_target_open3d
 
+# 部分一致で満点(1.0)を与えるのに必要な最小文字数．
+# 下限が無いと，型番 ESC0407 に対して箱に印字された '4' の1文字が
+# 「esc0407 に含まれる」だけで満点になる．1文字の輪郭はほぼ正方形で向きが
+# 定まらないため，これを軸の基準にすると幅を測る向きが90°倒れる．
+MIN_SUBSTRING_MATCH_LEN = 6
+
+
 def _text_similarity(a: str, b: str) -> float:
     """
     OCR文字列と query の緩い類似度．
     タイトル全体でなく一部だけ読めた場合も拾えるようにする．
+    ただし短すぎる部分一致は満点にしない（MIN_SUBSTRING_MATCH_LEN）．
     """
     from difflib import SequenceMatcher
 
@@ -65,7 +73,7 @@ def _text_similarity(a: str, b: str) -> float:
     b = norm(b)
     if not a or not b:
         return 0.0
-    if a in b or b in a:
+    if (a in b or b in a) and min(len(a), len(b)) >= MIN_SUBSTRING_MATCH_LEN:
         return 1.0
     return float(SequenceMatcher(None, a, b).ratio())
 
