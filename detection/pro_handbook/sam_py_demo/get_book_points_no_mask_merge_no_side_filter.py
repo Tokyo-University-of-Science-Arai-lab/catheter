@@ -483,12 +483,33 @@ def _device_info(device, key):
         return None
 
 
+def _hardware_reset_realsense_and_wait(wait_s: float = 8.0) -> None:
+    """RealSenseを USBレベルでハードウェアリセットし、再列挙されるまで待つ。
+
+    ``pipe.start()`` は一瞬で成功するのに最初の ``wait_for_frames()`` が
+    タイムアウトする症状（ストリーミングだけ応答しないロック状態）からの
+    復旧策。過去の実機トラブルでは、これを実行するとフレームが即座に
+    正常取得できるようになった。
+    """
+    ctx = rs.context()
+    devices = ctx.query_devices()
+    for device in devices:
+        print(
+            "[REALSENSE] hardware_reset() "
+            f"{_device_info(device, rs.camera_info.name)} "
+            f"{_device_info(device, rs.camera_info.serial_number)}"
+        )
+        device.hardware_reset()
+    time.sleep(wait_s)
+
+
 def capture_rgbd_once_no_mask_merge_no_side_filter(
     shot_dir: str | Path,
     *,
     width: int = 1280,
     height: int = 720,
     fps: int = 6,
+    max_attempts: int = 2,
 ) -> tuple[np.ndarray, np.ndarray, object, float, dict]:
     """Capture one aligned RGB-D sample using the production stream settings.
 
@@ -496,93 +517,112 @@ def capture_rgbd_once_no_mask_merge_no_side_filter(
     ``capture_one_shot()``: color BGR8 + depth Z16, align depth to color, discard
     ten warm-up frames, apply the existing depth filter, then save one sample.
     ``pipeline.stop()`` is guaranteed by ``finally``.
+
+    "Frame didn't arrive" タイムアウトが出た場合は、RealSenseを
+    ``hardware_reset()`` してから ``max_attempts`` 回まで自動的に
+    撮影をリトライする。
     """
     shot_dir = Path(shot_dir).expanduser().resolve()
-    pipe = rs.pipeline()
-    cfg = rs.config()
-    cfg.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
-    cfg.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
-    align = rs.align(rs.stream.color)
-    profile = None
-    started = False
-    capture_timestamp = datetime.now().astimezone()
-    try:
-        profile = pipe.start(cfg)
-        started = True
-        for _ in range(10):
-            pipe.wait_for_frames()
-        frames = pipe.wait_for_frames()
-        aligned = align.process(frames)
-        depth_frame = current.depth_filter_like_viewer(aligned.get_depth_frame())
-        color_frame = aligned.get_color_frame()
-        if not depth_frame or not color_frame:
-            raise RuntimeError("aligned RealSense color/depth frame is unavailable")
 
-        color_np = np.asanyarray(color_frame.get_data())
-        depth_np = np.asanyarray(depth_frame.get_data())
-        if color_np.shape != (height, width, 3) or color_np.dtype != np.uint8:
-            raise RuntimeError(
-                f"unexpected RGB frame: shape={color_np.shape} dtype={color_np.dtype}"
+    for attempt in range(1, max_attempts + 1):
+        if attempt > 1:
+            _hardware_reset_realsense_and_wait()
+
+        pipe = rs.pipeline()
+        cfg = rs.config()
+        cfg.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+        cfg.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
+        align = rs.align(rs.stream.color)
+        profile = None
+        started = False
+        capture_timestamp = datetime.now().astimezone()
+        try:
+            profile = pipe.start(cfg)
+            started = True
+            for _ in range(10):
+                pipe.wait_for_frames()
+            frames = pipe.wait_for_frames()
+            aligned = align.process(frames)
+            depth_frame = current.depth_filter_like_viewer(aligned.get_depth_frame())
+            color_frame = aligned.get_color_frame()
+            if not depth_frame or not color_frame:
+                raise RuntimeError("aligned RealSense color/depth frame is unavailable")
+
+            color_np = np.asanyarray(color_frame.get_data())
+            depth_np = np.asanyarray(depth_frame.get_data())
+            if color_np.shape != (height, width, 3) or color_np.dtype != np.uint8:
+                raise RuntimeError(
+                    f"unexpected RGB frame: shape={color_np.shape} dtype={color_np.dtype}"
+                )
+            if depth_np.shape != (height, width) or depth_np.dtype != np.uint16:
+                raise RuntimeError(
+                    f"unexpected Depth frame: shape={depth_np.shape} dtype={depth_np.dtype}"
+                )
+
+            depth_profile = rs.video_stream_profile(depth_frame.get_profile())
+            intr = depth_profile.get_intrinsics()
+            depth_scale = float(
+                profile.get_device().first_depth_sensor().get_depth_scale()
             )
-        if depth_np.shape != (height, width) or depth_np.dtype != np.uint16:
-            raise RuntimeError(
-                f"unexpected Depth frame: shape={depth_np.shape} dtype={depth_np.dtype}"
+            cv2.imwrite(str(shot_dir / "after_init_rgb.png"), color_np)
+            np.save(shot_dir / "after_init_depth.npy", depth_np)
+
+            intrinsics_payload = {
+                "width": int(intr.width),
+                "height": int(intr.height),
+                "fx": float(intr.fx),
+                "fy": float(intr.fy),
+                "ppx": float(intr.ppx),
+                "ppy": float(intr.ppy),
+                "model": str(intr.model),
+                "coeffs": [float(value) for value in intr.coeffs],
+                "depth_scale": depth_scale,
+            }
+            _write_json(shot_dir / "camera_intrinsics.json", intrinsics_payload)
+            device = profile.get_device()
+            metadata = {
+                "capture_timestamp": capture_timestamp.isoformat(),
+                "capture_count": 1,
+                "warmup_frame_count": 10,
+                "rgb_shape": list(color_np.shape),
+                "rgb_dtype": str(color_np.dtype),
+                "depth_shape": list(depth_np.shape),
+                "depth_dtype": str(depth_np.dtype),
+                "rgb_format": "bgr8",
+                "depth_format": "z16",
+                "depth_unit": "meter per Z16 count",
+                "depth_scale": depth_scale,
+                "camera_intrinsics": intrinsics_payload,
+                "aligned_depth_to_color": True,
+                "realsense_device_name": _device_info(device, rs.camera_info.name),
+                "serial_number": _device_info(device, rs.camera_info.serial_number),
+                "firmware_version": _device_info(
+                    device, rs.camera_info.firmware_version
+                ),
+                "requested_stream": {
+                    "width": width,
+                    "height": height,
+                    "fps": fps,
+                    "color": "bgr8",
+                    "depth": "z16",
+                },
+            }
+            _write_json(shot_dir / "realsense_capture_metadata.json", metadata)
+            return color_np, depth_np, intr, depth_scale, metadata
+        except RuntimeError as exc:
+            retryable = (
+                "didn't arrive" in str(exc) and attempt < max_attempts
             )
-
-        depth_profile = rs.video_stream_profile(depth_frame.get_profile())
-        intr = depth_profile.get_intrinsics()
-        depth_scale = float(
-            profile.get_device().first_depth_sensor().get_depth_scale()
-        )
-        cv2.imwrite(str(shot_dir / "after_init_rgb.png"), color_np)
-        np.save(shot_dir / "after_init_depth.npy", depth_np)
-
-        intrinsics_payload = {
-            "width": int(intr.width),
-            "height": int(intr.height),
-            "fx": float(intr.fx),
-            "fy": float(intr.fy),
-            "ppx": float(intr.ppx),
-            "ppy": float(intr.ppy),
-            "model": str(intr.model),
-            "coeffs": [float(value) for value in intr.coeffs],
-            "depth_scale": depth_scale,
-        }
-        _write_json(shot_dir / "camera_intrinsics.json", intrinsics_payload)
-        device = profile.get_device()
-        metadata = {
-            "capture_timestamp": capture_timestamp.isoformat(),
-            "capture_count": 1,
-            "warmup_frame_count": 10,
-            "rgb_shape": list(color_np.shape),
-            "rgb_dtype": str(color_np.dtype),
-            "depth_shape": list(depth_np.shape),
-            "depth_dtype": str(depth_np.dtype),
-            "rgb_format": "bgr8",
-            "depth_format": "z16",
-            "depth_unit": "meter per Z16 count",
-            "depth_scale": depth_scale,
-            "camera_intrinsics": intrinsics_payload,
-            "aligned_depth_to_color": True,
-            "realsense_device_name": _device_info(device, rs.camera_info.name),
-            "serial_number": _device_info(device, rs.camera_info.serial_number),
-            "firmware_version": _device_info(
-                device, rs.camera_info.firmware_version
-            ),
-            "requested_stream": {
-                "width": width,
-                "height": height,
-                "fps": fps,
-                "color": "bgr8",
-                "depth": "z16",
-            },
-        }
-        _write_json(shot_dir / "realsense_capture_metadata.json", metadata)
-        return color_np, depth_np, intr, depth_scale, metadata
-    finally:
-        if started:
-            pipe.stop()
-            print("[REALSENSE] pipeline stopped")
+            if not retryable:
+                raise
+            print(
+                f"[REALSENSE] frame timeout (attempt {attempt}/{max_attempts})"
+                f"、hardware_reset()して再試行します: {exc}"
+            )
+        finally:
+            if started:
+                pipe.stop()
+                print("[REALSENSE] pipeline stopped")
 
 
 def run_capture_and_pca_no_mask_merge_no_side_filter(

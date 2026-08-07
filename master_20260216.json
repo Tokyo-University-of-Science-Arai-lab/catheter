@@ -1,15 +1,5 @@
 [
   {
-    "book_name": "ESC0407",
-    "display_name": "TransForm",
-    "LOT": "不明",
-    "expiration date": "2027-10-28",
-    "ISBN_number": "9784297118846",
-    "bookshelf_ID": "1-1-1-1",
-    "book_width": "17.5"
-  },
-
-  {
   "book_name": "612104",
   "display_name": "Target XL",
   "LOT": "不明",
@@ -19,6 +9,16 @@
   "book_width": "17"
   },
 
+  {
+    "book_name": "ESC0407",
+    "display_name": "TransForm",
+    "LOT": "不明",
+    "expiration date": "2027-10-28",
+    "ISBN_number": "9784297118846",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.5"
+  },
+  
   {
   "book_name": "SSTD215STR",
   "display_name": "Synchro SELECT",
