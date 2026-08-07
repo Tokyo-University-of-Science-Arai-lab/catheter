@@ -387,12 +387,16 @@ def main_sequence(
         shelf_manager.received = False
         waypoint_node.reset()
         # ==============================
-        # shelf_id 受信待ち
+        # shelf_id 取得（YAML設定優先、なければトピック待ち）
         # ==============================
-        node.get_logger().info("Waiting for /shelf_id ...")
-
-        while rclpy.ok() and not shelf_manager.is_received():
-            executor.spin_once(timeout_sec=0.1)
+        yaml_shelf_id = config.get("shelf_id")
+        if yaml_shelf_id:
+            node.get_logger().info(f"Using shelf_id from config: {yaml_shelf_id}")
+            shelf_manager.set_from_string(str(yaml_shelf_id))
+        else:
+            node.get_logger().info("Waiting for /shelf_id ...")
+            while rclpy.ok() and not shelf_manager.is_received():
+                executor.spin_once(timeout_sec=0.1)
 
         side = shelf_manager.get_side()
         height = shelf_manager.get_height()
@@ -534,7 +538,9 @@ def main_sequence(
 
         # ==============================
         # init → capture 姿勢へ（Waypoint）
-        node.get_logger().info("Waiting for manual /navigation_goal_final")
+        # AMR不使用のため trigger_goal() で直接起動
+        node.get_logger().info("Triggering waypoint directly (AMR not used)")
+        waypoint_node.trigger_goal()
 
         while rclpy.ok() and not waypoint_node.is_finished():
             executor.spin_once(timeout_sec=0.1)
@@ -556,15 +562,21 @@ def main_sequence(
                     f"{insert_attempt}/{MAX_CURRENT_INSERT_ATTEMPTS}"
                 )
 
-                # 電流検知後はCAPTURE_RIGHTへ戻るため、
-                # 初回・再試行のどちらでもTCP高さ補正を適用する。
-                print("TCP調整開始")
-                safe_motion(
-                    lambda: arm.moveL_tcp_z_offset(tcp_offset),
-                    monitor,
-                    "tcp_z_offset",
-                )
-                time.sleep(1.0)
+                # 電流検知後はTCP補正後の撮影姿勢へ戻るため、
+                # TCP高さ補正は初回のみ適用する。
+                # moveL_tcp_z_offset は相対移動なので、
+                # 再試行のたびに呼ぶとZが多重に加算されてしまう。
+                if insert_attempt == 1:
+                    print("TCP調整開始")
+                    safe_motion(
+                        lambda: arm.moveL_tcp_z_offset(tcp_offset),
+                        monitor,
+                        "tcp_z_offset",
+                    )
+                    time.sleep(1.0)
+
+                    # 電流検知時の復帰先。TCP補正後の姿勢を保存する。
+                    retry_capture_pose = arm.get_tcp_pose(is_radian=True)
 
                 # 前回の認識結果を残さない
                 runtime_log["roll_deg"] = None
@@ -749,7 +761,7 @@ def main_sequence(
 
                 HandBook_retrieval.open_until_width(
                     HandMotors_retrieval,
-                    book_width,
+                    book_width -8.0,
                     gravity=False,
                 )
 
@@ -761,7 +773,9 @@ def main_sequence(
                     # 通常と同じmoveL挿入を行い、挿入中だけJ1電流を監視する。
                     insert_result = (
                         arm.moveL_to_insert_right_with_current_monitor(
-                            return_joint_angles=CAPTURE_RIGHT,
+                            side=side,
+                            retry_capture_pose=retry_capture_pose,
+                            retry_capture_y_mm=p_robot_mm[1],
                         )
                     )
 
@@ -828,7 +842,7 @@ def main_sequence(
                                 f"result={retry_result}"
                             )
 
-                            # アームはCAPTURE_RIGHTへ戻っているが、
+                            # アームは撮影姿勢（TCP補正後）へ戻っているが、
                             # ハンドは本幅まで開いたままなので閉じ直す。
                             print(
                                 "[HAND RETRY] 再認識前に"

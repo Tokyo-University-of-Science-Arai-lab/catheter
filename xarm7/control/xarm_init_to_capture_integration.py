@@ -59,13 +59,14 @@ class WaypointPlayerNode(Node):
         self._state = WaypointState.IDLE
         self._error_msg: str | None = None
         self.shelf_manager = ShelfIDManager(self)
-        # capture_to_init 用トピック
-        self.create_subscription(
-            Bool,
-            "/navigation_goal_final",
-            self.goal_cb,
-            10,
-        )
+        # AMR使用時: /navigation_goal_final を受信してウェイポイントを起動する
+        # AMR不使用時は trigger_goal() を直接呼ぶためコメントアウト
+        # self.create_subscription(
+        #     Bool,
+        #     "/navigation_goal_final",
+        #     self.goal_cb,
+        #     10,
+        # )
         # 上下機構ターゲット
         self.target_pub = self.create_publisher(
             Float32,
@@ -77,13 +78,18 @@ class WaypointPlayerNode(Node):
         )
 
     # ======================
-    # Subscriber callback
+    # Subscriber callback（AMR使用時）
     # ======================
     def goal_cb(self, msg: Bool):
         if not msg.data:
             return
+        self.trigger_goal()
 
-        # shelf_id がまだ来てなかったら何もしない
+    # ======================
+    # AMR不使用時に直接呼ぶトリガ
+    # ======================
+    def trigger_goal(self):
+        """shelf_manager の情報をもとにウェイポイントを直接起動する。"""
         if not self.shelf_manager.is_received():
             self.get_logger().warn("Shelf ID not received yet")
             return

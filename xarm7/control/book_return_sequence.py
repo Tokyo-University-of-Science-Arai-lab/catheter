@@ -253,7 +253,7 @@ def main():
 
         Xarm7 = XArm7(
             node=node,
-            host="192.168.2.197"
+            host="192.168.2.221"
         )
 
         storage_sequence(Xarm7, Hand)

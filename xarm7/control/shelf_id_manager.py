@@ -50,7 +50,7 @@ class ShelfIDManager:
 
     #TCPのZ微調整（moveLでやる）: C -> tcp_z_offset_mm
     TCP_Z_OFFSET_MAP = {
-       1: 0.0,
+       1: 60.0,
        2: 0.0,
        3: 0.0,
        4: 50.0,
@@ -204,3 +204,10 @@ class ShelfIDManager:
     
     def get_tcp_z_offset(self):    # TCP微調整
         return self.tcp_z_offset
+
+    def set_from_string(self, data: str):
+        """YAMLなど外部設定から直接 shelf_id を設定する（トピック受信不要）。"""
+        from std_msgs.msg import String
+        msg = String()
+        msg.data = data
+        self.shelf_callback(msg)
