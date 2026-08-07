@@ -1,4 +1,5 @@
-python3 Retrieval_integration_input_SAM3_editing.py
+python3 Retrieval_integration_SAM3.py
+ros2 launch retrieval_manager retrieval_auto.launch.py
 
 【ロボシリンダー】
 ros2 run iai_cylinder height_controller
@@ -23,15 +24,9 @@ python3 -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
 python3 -m Dynamixel_win_pro_hand_book.id_1_gripper_pos_check
 python3 -m Dynamixel_win_pro_hand_book.id_2_sp_rot_pos_check
 python3 -m Dynamixel_win_pro_hand_book.id_3_sp_lin_pos_check
-
-cd ~/pro_book/pro_hand_book_python
-source .pro_hand_book_fixed/bin/activate
-python Retrieval_Sequence.py
+python3 -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
 
 
-cd ~/pro_book/pro_hand_book_python
-source .pro_hand_book_fixed/bin/activate
-python HandBook_Retrieval_ver2.py
 
 ros2 launch xarm7_moveit_cpp move_tcp_x.launch.py
 
@@ -45,13 +40,11 @@ source .pro_hand_book_fixed/bin/activate
 python -m Dynamixel_win_pro_hand_book.id_1_gripper_pos_check
 
 
-cd ~/pro_book/pro_hand_book_python
+【マニピュレータ】
 python3 -m xarm7.control.xarm_init_to_capture
 
-cd ~/pro_book/pro_hand_book_python
 python3 -m xarm7.control.xarm_init_to_capture_left
 
-cd ~/pro_book/pro_hand_book_python
 python3 -m xarm7.control.xarm_capture_to_init
 
 ros2 launch xarm_planner xarm7_planner_realmove.launch.py robot_ip:=192.168.1.208
@@ -60,13 +53,13 @@ ros2 launch xarm_moveit_config _robot_moveit_realmove.launch.py   robot_ip:=192.
  ros2 action send_goal /move_tcp xarm7_moveit_msgs/action/MoveTCP "{dx: 0.05}"
 
 
- 
+ python3 -m xarm7.control.move_to_container_test
  cd /ros2_ws/src/xarm7_teaching
  
 
 【二人で使いたい時】
- /opt/TurboVNC/bin/vncserver :3
-
+/opt/TurboVNC/bin/vncserver -kill :3
+/opt/TurboVNC/bin/vncserver :3
 
 
 iPhone:172.20.10.5
