@@ -191,3 +191,100 @@ catheter100の識別(`match_text_to_mask_main`)本体である`catheter/scripts/
   将棋倒し状に傾いている混在状態だった。
 
 **2026-08-21、ユーザー判断によりここで一区切り。** 次に着手するなら6.3の(a)(b)を参照。
+
+## 7. 幅推定精度改善への再着手 (2026-08-21、6.のさらに続き)
+
+上記6.は「識別精度」側の調査で一区切りとしたが、同日中に**幅推定誤差(MAE 6〜7mm)**の
+根本原因調査に着手し、複数の修正を実装した。
+
+### 7.1 重大な訂正: 6.で報告した識別精度の数値は回転バグの影響下だった
+
+6.の88件レビュー(T=11 F=77、正答率1〜2割)は、**評価スクリプト`width_mm_validation.py`
+自身が持っていた180度回転バグ**(depth_shotsを不要に回転させてOCR/SAM3に上下逆さまの
+画像を渡していた)の影響下で行われたものだった。回転処理を削除して再実行した結果、
+識別正答率は**90%(18/20サンプル目視)**まで回復した。本番パイプライン
+(`get_book_points.py`)には回転処理は一切無く、実機は無傷。詳細は
+`~/.claude/projects/-home-catheter-pro-book/memory/catheter_width_accuracy_root_cause.md`
+を参照。
+
+### 7.2 マスク生成〜幅推定パイプラインの段階一覧
+
+`_run_recognition_core_like_offline`(get_book_points.py)が全体を統括。
+`debug_residual_stage_diagnostics`に記録される主な段階:
+
+| stage_id | ステージ名 | 内容 |
+|---|---|---|
+| (SAM3選択直後) | ー | SAM3が"book spine"プロンプトで初期マスク生成、OCRとマッチングして対象マスク選択 |
+| 01 | after_depth_prefilter | 選択マスク内のDepth中央値±3cmで外れ値除去(2026-08-21、マスク分裂対応ステージ7.4を追加) |
+| 02 | after_depth_prefilter_spine_completion | OCR軸中心帯で背表紙内部の欠けを補完 |
+| 07 | after_column_refine | 背表紙方向の列長フィルタ。自動スコアで複数モードから選択。最も幅を大きく変える主要ステージ |
+| 08 | after_final_t_width_clip | 07で`seed_width_guard_false`選択時の安全網。OCR由来の推定幅を基準に追加クリップ |
+| 09 | after_post_column_side_front_prune | 07で削った側の短列を追加除去 |
+| 11 | after_ransac_spine_plane | OCR文字領域から推定した平面でRANSAC外れ点除去 |
+| 12 | after_post_ransac_a95 | RANSAC平面上a方向95%点だけ残す |
+| 90 | final_before_calculate_yaw | 最終マスク(final.pngと同じ)。ここから`estimate_book_width_from_filtered_mask_axis`で幅算出 |
+
+stand-100の100件を分析し、**リファイン段階(07〜12)全体の変化量と最終誤差がピアソン
+r=0.578で相関**すること、**depth前処理(01)でのマスク分裂(component_count>1)が
+誤差増加と弱い相関**(単一成分78件平均5.95mm・分裂22件平均7.88mm)を持つことを確認。
+詳細は`~/.claude/projects/-home-catheter-pro-book/memory/
+catheter_width_mask_pipeline_investigation.md`を参照。
+
+### 7.3 識別バグ: 隣接マスクの矩形バウンディングボックス重複によるOCRテキスト混入(修正済み)
+
+`multikey_matcher.py`の`_collect_mask_texts()`が、OCR文字を矩形バウンディングボックス
+(傾きの無い直方体)同士の重なりでマスクへ割り当てていたため、棚で微妙に傾いて隣接する
+2箱の矩形が重なり合い、片方の文字がもう片方のテキストバケットへ混入する実例
+(query=ESC0305で隣のAXS Vecta 46 DACのバケットに"ESC0305"が混入しconfident=Trueで
+誤選択)を発見。**実際のマスク輪郭(ピクセル単位、`cv2.fillPoly`でOCR文字ポリゴンを
+描画してマスクとAND演算)との重なりで判定するよう修正済み**。100件再テストで該当バグ
+2件が正しい方向に修正され、新たな悪化は無いことを確認。
+
+### 7.4 マスク分裂対応ステージ(優先度1、実装済み・A/B比較中)
+
+`handle_mask_fragmentation_after_depth_prefilter()`(get_book_points.py)を追加。
+01(depth外れ値除去)直後に`component_count > 1`を検知したら、(1)モルフォロジー的
+closing(15px)で近接する穴・隙間を橋渡しして再結合を試み、(2)closingでも残った
+成分は最大成分の8%未満のものだけノイズとして除去する。`enable_fragmentation_handling`
+引数で有効/無効を切替可能(既定True)。100件A/B比較は実行中(2026-08-21時点)。
+
+### 7.5 depth外れ値除去のRANSAC平面残差版(優先度2、ed実装・A/B比較中)
+
+`save_masked_and_cropped()`に`outlier_method="ransac_residual"`を追加(既定は従来通り
+`"absolute"`)。OCR参照領域からRANSAC平面フィット→残差8mm(`ransac_distance_threshold_m`)
+で外れ値判定する、傾いた背表紙面に対応した方式。点数不足/フィット失敗時は絶対閾値方式へ
+自動フォールバックする。`_run_recognition_core_like_offline`/`run_capture_and_pca_offline`
+に`depth_outlier_method`引数を追加し、呼び出し側から選択可能。100件A/B比較は実行中。
+
+### 7.6 色の補助識別キー(実装済み)
+
+無地・OCR手がかりの薄い品目(オレンジ箱等)向けの補助シグナル。`reco/master_catheter_reco.json`
+に20品目分`color_rgb`(confident=Trueな実例からRGB平均値をブートストラップ)を追加し、
+`multikey_matcher.py`のスコア行列に4番目のキーとして`color`を追加。**注意**: 実装直後、
+色スコアが僅差でwinning_keyの座を奪いconfident判定を壊す副作用が4項目で発生したため、
+中央値センタリング後の色スコアに減衰係数0.35を掛けて解決済み(白〜グレー系の似た色の
+品目間では影響が出ず、オレンジ箱のように明確に色が違う場合だけ効くよう調整)。
+
+### 7.7 推定幅誤差5mm以上でのリトライ機構(実装済み、パラメータ変化の詳細)
+
+`width_mm_validation.py`に`run_one_with_retry()`を追加。**正解幅(book_width)との誤差が
+5mm以上の場合のみ**、最大3回まで異なるパラメータで再実行し、最も正解に近かった結果を
+採用する(正解が分からない本番環境では判定できないため、本番への適用は別途要検討として
+いったん評価スクリプト側のみ)。
+
+同じ静止画像に対して全く同じパラメータで再実行してもパイプラインは決定的(SAM3は
+テキストプロンプト固定でランダム性なし)なので、各試行で以下のように**depth外れ値除去
+(②)に関わるパラメータを実際に変えている**:
+
+| 試行 | depth_outlier_method | depth_merge_tolerance_raw(絶対閾値の許容幅) | 備考 |
+|---|---|---|---|
+| 0(初回) | absolute | 30(±3cm) | パイプライン既定の挙動そのまま |
+| 1(retry 1回目) | ransac_residual | 30(±3cm、フォールバック時のみ使用) | 7.5のRANSAC平面残差方式に切替。残差閾値は既定8mm |
+| 2(retry 2回目) | absolute | 45(±4.5cm) | 絶対閾値方式のまま、許容幅だけ1.5倍に拡大 |
+| 3(retry 3回目・最終) | ransac_residual | 45(±4.5cm、フォールバック時のみ使用) | RANSAC失敗時のフォールバック幅だけ試行1と異なる |
+
+各試行は`{フォルダ名}_attempt{N}`という別フォルダに保存され、後から個別に確認できる。
+CSV/Excelに`retry_count`列を追加済み。オレンジ箱(識別自体が破綻、score=0.0)でのスモーク
+テストでは3回ともRANSAC失敗→フォールバックとなり改善が無かったが、これは想定通りの
+挙動(識別が機能していない極端ケース)として確認済み。100件全体でのretry発動率・改善率は
+7.4/7.5のA/B比較と合わせて今後まとめる。

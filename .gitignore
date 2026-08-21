@@ -78,6 +78,7 @@ reco/*/width_eval_work*/
 reco/*/depth_shots/
 reco/*/images/
 reco/*/width_eval_report/
+reco/*/reco_result_*/
 reco/*/outputs/
 
 # Local installers and archives

@@ -6,7 +6,8 @@
   "expiration date": "2030-06-07",
   "ISBN_number": "9784627846913",
   "bookshelf_ID": "1-1-1-1",
-  "book_width": "17"
+  "book_width": "17",
+  "color_rgb": [155, 136, 109]
   },
 
   {
@@ -16,7 +17,8 @@
     "expiration date": "2027-10-28",
     "ISBN_number": "9784297118846",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "17.5"
+    "book_width": "17.5",
+    "color_rgb": [88, 129, 144]
   },
 
   {
@@ -26,17 +28,19 @@
   "expiration date": "2028-11-15",
   "ISBN_number": "9784254209457",
   "bookshelf_ID": "1-1-1-1",
-  "book_width": "18.0"
+  "book_width": "18.0",
+  "color_rgb": [109, 127, 141]
   },
 
   {
     "book_name": "XT275081",
-    "display_name": "Excelsior® XT-27",
+    "display_name": "Excelsior XT-27",
     "LOT": "不明",
     "expiration date": "2028-12-03",
     "ISBN_number": "9784489020360",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "18"
+    "book_width": "18",
+    "color_rgb": [161, 143, 112]
   },
 
   {
@@ -46,27 +50,30 @@
     "expiration date": "2027-02-13",
     "ISBN_number": "9784130628051",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "19.0"
+    "book_width": "19.0",
+    "color_rgb": [95, 129, 153]
   },
 
   {
     "book_name": "INC-11814-125",
-    "display_name": "AXS Vecta® 46 DAC",
+    "display_name": "AXS Vecta 46 DAC",
     "LOT": "不明",
     "expiration date": "2028-06-29",
     "ISBN_number": "9784798068299",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "22.8"
+    "book_width": "22.8",
+    "color_rgb": [151, 175, 167]
   },
 
   {
     "book_name": "INC-11814-146",
-    "display_name": "AXS Vecta® 46",
+    "display_name": "AXS Vecta 46",
     "LOT": "不明",
     "expiration date": "2028-09-22",
     "ISBN_number": "9784798068299",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "22.2"
+    "book_width": "22.2",
+    "color_rgb": [153, 179, 175]
   },
 
 {
@@ -76,7 +83,8 @@
     "expiration date": "2028-11-27",
     "ISBN_number": "9784798068299",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "21.0"
+    "book_width": "21.0",
+    "color_rgb": [183, 182, 182]
   },
 
   {
@@ -86,7 +94,8 @@
     "expiration date": "2028-1105",
     "ISBN_number": "9784781908137",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "17.0"
+    "book_width": "17.0",
+    "color_rgb": [146, 157, 167]
   },
   {
     "book_name": "MAT-110-110",
@@ -95,34 +104,38 @@
     "expiration date": "2027-10-14",
     "ISBN_number": "9784789016278",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "17.0"
+    "book_width": "17.0",
+    "color_rgb": [75, 113, 50]
   },
   {
     "book_name": "M00345100950",
-    "display_name": "Strykerの厚いオレンジの箱",
+    "display_name": "Stryker UPN",
     "LOT": "不明",
     "expiration date": "2027-09-22",
     "ISBN_number": "9784065218846",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "44.2"
+    "book_width": "44.2",
+    "color_rgb": [177, 131, 102]
   },
   {
     "book_name": "C1775ST",
-    "display_name": "Excelsior® XT-17",
+    "display_name": "Excelsior XT-17",
     "LOT": "26060585",
     "expiration date": "2028-01-03",
     "ISBN_number": "不明",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "17.0"
+    "book_width": "17.0",
+    "color_rgb": [165, 153, 113]
   },
   {
     "book_name": "1681189",
-    "display_name": "Excelsior® SL-10",
+    "display_name": "Excelsior SL-10",
     "LOT": "26124294",
     "expiration date": "2028-02-18",
     "ISBN_number": "不明",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "17.0"
+    "book_width": "17.0",
+    "color_rgb": [115, 154, 154]
   },
   {
     "book_name": "EZAS3021",
@@ -131,7 +144,8 @@
     "expiration date": "2028-12-09",
     "ISBN_number": "不明",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "16.8"
+    "book_width": "16.8",
+    "color_rgb": [99, 116, 137]
   },
   {
     "book_name": "10CSW12612",
@@ -140,7 +154,8 @@
     "expiration date": "2031-04-14",
     "ISBN_number": "不明",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "15.2"
+    "book_width": "15.2",
+    "color_rgb": [149, 139, 139]
   },
   {
     "book_name": "AIN-CHI-200R",
@@ -149,7 +164,8 @@
     "expiration date": "2029-02",
     "ISBN_number": "不明",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "15.0"
+    "book_width": "15.0",
+    "color_rgb": [187, 184, 188]
   },
   {
     "book_name": "SS2-40-070H",
@@ -158,7 +174,8 @@
     "expiration date": "2029-03-31",
     "ISBN_number": "不明",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "17.1"
+    "book_width": "17.1",
+    "color_rgb": [138, 130, 137]
   },
   {
     "book_name": "KMDA044178",
@@ -167,7 +184,8 @@
     "expiration date": "2029-03-25",
     "ISBN_number": "不明",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "26"
+    "book_width": "26",
+    "color_rgb": [175, 173, 177]
   },
   {
     "book_name": "DAC6F115",
@@ -176,7 +194,8 @@
     "expiration date": "2027-01-16",
     "ISBN_number": "不明",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "27.0"
+    "book_width": "27.0",
+    "color_rgb": [113, 135, 139]
   },
   {
     "book_name": "ESC0305",
@@ -185,7 +204,8 @@
     "expiration date": "2027-12-02",
     "ISBN_number": "不明",
     "bookshelf_ID": "1-1-1-1",
-    "book_width": "17.0"
+    "book_width": "17.0",
+    "color_rgb": [106, 141, 151]
   }
 
 ]

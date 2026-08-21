@@ -6,19 +6,32 @@ reco/*/depth_shots/ の実撮影(RGB+depth+camera_params.json)に対し、get_bo
 実際に呼び出し、推定した実mm幅をマスタJSON(reco/master_catheter_reco.json)の
 book_width(mm、正解値)と比較する。
 
-depth_shots画像はOCR都合で撮影時のセンサー向きから180度回転させて保存されている
-(reco/README.md参照)。RGB/depthを同時にnp.rot90(arr, 2)で撮影時の向きに戻した上で、
-スクラッチ作業フォルダにコピーしてから処理する(OCRサブプロセスがshot_dir直下の
-after_init_rgb.pngをディスクから直接読むため、in-memory配列だけでなく実ファイルも
-揃えて回転を一致させる必要がある)。camera_params.jsonの内部パラメータはget_book_points.py
-のオフライン版が使う固定値と完全一致することを確認済みなので、そのまま使う。
+【2026-08-21 訂正】以前ここには「depth_shotsは180度回転させて保存されているので
+撮影時の向きに戻す」と書かれ、実際にnp.rot90(arr, 2)をかけていたが、これは誤りだった。
+depth_shots自体が本来のパイプラインが得る正しい向きのデータであり(ユーザー確認済み、
+生画像を直接目視しても正立・可読)、回転が必要なのは逆にannotations側(images/*.png、
+人間のアノテーション用)の方だった。この誤った回転により、OCR/識別が長時間にわたり
+誤った向きの画像で動作していた(識別正答率が10〜22%まで悪化する原因になっていた)。
+現在はdepth_shotsのRGB/depthをそのままコピーするだけで、回転処理は一切行わない。
 
 reco/*/内のオリジナルdepth_shots/は一切変更しない(読み取り専用)。
+
+作業フォルダ・結果CSVの名前には実行日時を必ず含める(2026-08-21、ユーザー要望)。
+`--label`で意味のある名前も併用できる。
+
+stand-100の各アイテムの作業フォルダ名は`{処理順}-{使用した画像番号}-{display_name}`
+(例: `23-2-Target_XL`)。処理順(i+1)はこの実行内でのjobs一覧上の通し番号で、
+以前の「認識番号」(=実行そのものの世代番号、例:7)とは別物(2026-08-21、ユーザー要望:
+「認識した順番-使用した画像-display_name」で命名してほしい、との追加依頼への対応)。
+CSVの`shot`列自体は従来通り`{画像番号}__{REF}`のまま(一意性・resume判定用)。
+diagonal-40は1画像=1アイテムで曖昧さがないため、work_root直下のフォルダ名は
+従来通りshot_dir.name(例: `Target_R`)のまま変更していない。
 
 実行:
     cd ~/pro_book/pro_hand_book_python
     .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset diagonal-40
     .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset stand-100
+    .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset stand-100 --label rotfix
     .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset diagonal-40 --only Target_R --verbose
 """
 from __future__ import annotations
@@ -55,6 +68,25 @@ def _ensure_cuda_ld_library_path() -> None:
 
 
 _ensure_cuda_ld_library_path()
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-21発見: PYTHONHASHSEEDが未固定だと(既定でPython起動ごとにランダム化される)、
+# 識別スコアが完全にタイになる品目(OCR手がかりが皆無なオレンジ箱等)で、Hungarian法割当の
+# タイブレークがdict/set反復順に依存し、プロセス起動のたびに選ばれるマスクが変わる実例を
+# 確認した(同一shot・同一パラメータでも"selected id=1"と"selected id=21"のように結果が
+# 変わった)。SAM3の生マスク・OCR認識テキスト自体は完全に決定的なことを確認済みで、
+# 揺れの原因はハッシュランダム化のみ。1回のスクリプト実行内(リトライ含む)は同一プロセスの
+# ため揺れないが、スクリプトを再実行して比較する場合(デバッグ・A/B比較)に結果が変わり
+# うるため、再現性のためPYTHONHASHSEEDを固定して自分自身を再起動する。
+# -----------------------------------------------------------------------------
+def _ensure_fixed_hash_seed() -> None:
+    if os.environ.get("PYTHONHASHSEED") != "0":
+        os.environ["PYTHONHASHSEED"] = "0"
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+_ensure_fixed_hash_seed()
 
 import numpy as np  # noqa: E402
 import cv2  # noqa: E402
@@ -100,6 +132,10 @@ def load_master() -> dict[str, dict]:
     return {r["book_name"]: r for r in rows}
 
 
+def safe_name(s: str) -> str:
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in s)
+
+
 def product_base_name(shot_folder_name: str) -> str:
     for suffix in ("_L", "_R"):
         if shot_folder_name.endswith(suffix):
@@ -107,7 +143,7 @@ def product_base_name(shot_folder_name: str) -> str:
     return shot_folder_name
 
 
-def prepare_derotated_shot(src_dir: Path, work_dir: Path) -> Path:
+def prepare_shot_files(src_dir: Path, work_dir: Path) -> Path:
     """depth_shots/<name>/ の after_init_rgb.png + after_init_depth.npy を
     work_dir にコピーする。
 
@@ -139,11 +175,11 @@ def prepare_derotated_shot(src_dir: Path, work_dir: Path) -> Path:
 
 
 def run_one(shot_name: str, src_dir: Path, query_book_name: str, work_root: Path,
-            runner_kwargs: dict) -> dict:
+            runner_kwargs: dict, folder_name: str | None = None) -> dict:
     from detection.pro_handbook.sam_py_demo.get_book_points import run_capture_and_pca_offline
 
-    work_dir = work_root / shot_name
-    prepare_derotated_shot(src_dir, work_dir)
+    work_dir = work_root / (folder_name or shot_name)
+    prepare_shot_files(src_dir, work_dir)
 
     t0 = time.time()
     theta_rad, target_point, book_width_mm, out_dir = run_capture_and_pca_offline(
@@ -163,6 +199,77 @@ def run_one(shot_name: str, src_dir: Path, query_book_name: str, work_root: Path
     }
 
 
+# 2026-08-21、ユーザー要望: 「推定幅誤差が5mm以上ある場合は認識をやり直す」の試験導入。
+# 【重要な設計上の前提】このスクリプトは正解幅(book_width、マスタJSON)が分かっている
+# 評価専用の文脈でのみ動く。同じ静止画像(after_init_rgb.png/depth.npy)に対して全く
+# 同じパラメータで再実行しても、パイプラインは決定的なので結果は変わらない
+# (SAM3はテキストプロンプト固定・ランダム性なし)。そのため「やり直す」とは、
+# depth外れ値除去の方式・許容幅という、②(depth prefilter)に関わるパラメータを
+# 変えながら複数バリエーションを試し、正解に最も近い結果を採用することを指す
+# (実機の再撮影のような新しい入力データを得る手段が無いオフライン評価での代替策)。
+# 本番(get_book_points.pyのオンライン経路)へ同じ仕組みを入れるかどうかは、実機が
+# 物理的に再撮影を伴う重い判断のため、いったんこの評価スクリプト側のみに留める。
+#
+# 【各試行で何がどう変わるか(2026-08-21、ユーザー確認済み・要明記)】
+# 試行0(初回、通常の実行): depth_outlier_method="absolute"、tolerance=±3cm(30 raw、
+#   depth_scale=0.001m/rawなので30 raw=30mm)。パイプラインの既定挙動そのまま。
+# 試行1(retry 1回目): depth_outlier_method="ransac_residual"。②の絶対閾値をやめ、
+#   OCR参照領域からRANSAC平面フィット→残差8mm(ransac_distance_threshold_m既定値)で
+#   外れ値除去する方式に切り替える(優先度2、ed実装)。点数不足/フィット失敗時は
+#   絶対閾値±3cm(tolerance変更なし)へ自動フォールバックする。
+# 試行2(retry 2回目): depth_outlier_method="absolute"に戻し、tolerance=±4.5cm
+#   (45 raw)に拡大。傾いた背表紙表面のdepth勾配が±3cmでは狭すぎる可能性を検証する。
+# 試行3(retry 3回目・最終): depth_outlier_method="ransac_residual" かつ
+#   tolerance=±4.5cm。RANSACが成功すればtoleranceの値自体は使われないが、
+#   RANSACが失敗して絶対閾値にフォールバックした場合は±4.5cmが使われる
+#   (試行1と試行3の違いは「RANSAC失敗時のフォールバック幅」のみ)。
+# 各試行後、正解幅(book_width)との誤差が最も小さかったものを採用する
+# (誤差<5mmになった時点で以降の試行は打ち切る)。
+WIDTH_ERROR_RETRY_THRESHOLD_MM = 5.0
+MAX_RETRIES = 3
+RETRY_VARIANTS: list[dict] = [
+    {"depth_outlier_method": "ransac_residual"},
+    {"depth_outlier_method": "absolute", "depth_merge_tolerance_raw": 45},
+    {"depth_outlier_method": "ransac_residual", "depth_merge_tolerance_raw": 45},
+]
+
+
+def run_one_with_retry(shot_name: str, src_dir: Path, query_book_name: str, work_root: Path,
+                        runner_kwargs: dict, true_mm, folder_name: str | None = None,
+                        enable_retry: bool = True) -> dict:
+    """abs_error_mmがWIDTH_ERROR_RETRY_THRESHOLD_MM以上ならRETRY_VARIANTSを順に試し、
+    正解幅に最も近かった結果を採用する。true_mmが無い場合はリトライせず1回だけ実行する
+    (正解が分からないと「改善したか」を判定できないため)。
+
+    各試行は同じfolder_name配下を上書きするのではなく、末尾に_attempt{N}を付けた
+    別フォルダに保存する(どの試行がどんな結果だったか後から確認できるようにするため)。
+    """
+
+    def _try(kwargs: dict, attempt_idx: int) -> tuple[dict, float | None]:
+        suffix = "" if attempt_idx == 0 else f"_attempt{attempt_idx}"
+        fname = f"{folder_name}{suffix}" if folder_name else f"{shot_name}{suffix}"
+        result = run_one(shot_name, src_dir, query_book_name, work_root, kwargs, folder_name=fname)
+        pred = float(result["book_width_mm_pred"])
+        err = abs(pred - float(true_mm)) if true_mm is not None else None
+        return result, err
+
+    best_result, best_err = _try(runner_kwargs, 0)
+    retry_count = 0
+
+    if enable_retry and true_mm is not None and best_err is not None and best_err >= WIDTH_ERROR_RETRY_THRESHOLD_MM:
+        for variant in RETRY_VARIANTS[:MAX_RETRIES]:
+            retry_count += 1
+            merged = {**runner_kwargs, **variant}
+            result, err = _try(merged, retry_count)
+            if err is not None and (best_err is None or err < best_err):
+                best_result, best_err = result, err
+            if err is not None and err < WIDTH_ERROR_RETRY_THRESHOLD_MM:
+                break
+
+    best_result["retry_count"] = retry_count
+    return best_result
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", choices=["diagonal-40", "stand-100"], required=True)
@@ -172,16 +279,30 @@ def main() -> None:
     ap.add_argument("--sam-pts-side", default=None,
                     help="get_book_points.pyのsam_pts_sideを上書きする(例: 64,16)。"
                          "省略時はパイプライン既定値(32,8)のまま。")
+    ap.add_argument("--depth-outlier-method", default=None, choices=["absolute", "ransac_residual"],
+                    help="get_book_points.pyのdepth_outlier_methodを上書きする"
+                         "(A/B比較用、2026-08-21追加)。省略時はパイプライン既定値(absolute)のまま。")
+    ap.add_argument("--label", default=None,
+                    help="work_root/out_csvのファイル名に付与する追加ラベル(例: rotfix)。"
+                         "実行日時(必須、常に付与)の後ろに追加される"
+                         "(例: --label rotfix -> _20260821_143000_rotfix)。")
     ap.add_argument("--work-suffix", default=None,
-                    help="work_root/out_csvのファイル名に付与する接尾辞(例: _ptsdense)。"
-                         "省略時は実行日時(例: _20260821_143000)を自動で付与し、"
-                         "実行のたびにフォルダ/ファイルが区別できるようにする"
-                         "(2026-08-21、ユーザー要望により変更)。")
+                    help="【非推奨、後方互換用】接尾辞を直接指定する。指定すると実行日時は"
+                         "付与されない。通常は--labelを使うこと。")
+    ap.add_argument("--no-retry", action="store_true",
+                    help="推定幅誤差5mm以上でのリトライを無効化する(A/B比較で単一要因だけを"
+                         "見たい場合用)。省略時はリトライ有効。")
+    ap.add_argument("--no-fragmentation-handling", action="store_true",
+                    help="②(depth prefilter)直後のマスク分裂対応ステージを無効化する"
+                         "(A/B比較用、2026-08-21追加、優先度1)。省略時は有効。")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
     if args.work_suffix is None:
-        args.work_suffix = "_" + time.strftime("%Y%m%d_%H%M%S")
+        # 2026-08-21、ユーザー要望: 実行日時は必ず含める(フォルダ/ファイルの区別のため)。
+        # --labelで意味のある名前も併用できる(例: _20260821_143000_rotfix)。
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        args.work_suffix = f"_{timestamp}" + (f"_{args.label}" if args.label else "")
 
     master_by_bookname = load_master()
 
@@ -196,6 +317,10 @@ def main() -> None:
     if args.sam_pts_side:
         a, b = args.sam_pts_side.split(",")
         runner_kwargs["sam_pts_side"] = (int(a), int(b))
+    if args.depth_outlier_method:
+        runner_kwargs["depth_outlier_method"] = args.depth_outlier_method
+    if args.no_fragmentation_handling:
+        runner_kwargs["enable_fragmentation_handling"] = False
 
     dataset_dir = RECO_ROOT / args.dataset
     depth_shots_dir = dataset_dir / "depth_shots"
@@ -236,7 +361,7 @@ def main() -> None:
         print(f"既存結果 {len(done_shots)}件をスキップ(resume)")
 
     fieldnames = ["shot", "query", "book_name_true", "display_name", "book_width_mm_true",
-                  "book_width_mm_pred", "abs_error_mm", "elapsed_sec", "error"]
+                  "book_width_mm_pred", "abs_error_mm", "retry_count", "elapsed_sec", "error"]
     write_header = not out_csv.exists()
     with open(out_csv, "a", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -257,17 +382,25 @@ def main() -> None:
                 "book_width_mm_true": true_mm,
                 "book_width_mm_pred": "",
                 "abs_error_mm": "",
+                "retry_count": 0,
                 "elapsed_sec": "",
                 "error": "",
             }
+            folder_name = None
+            if args.dataset == "stand-100":
+                image_id = shot_name.split("__", 1)[0]
+                folder_name = f"{i + 1}-{image_id}-{safe_name(row['display_name'] or shot_name)}"
             try:
-                result = run_one(shot_name, src_dir, book_name, work_root, runner_kwargs)
+                result = run_one_with_retry(shot_name, src_dir, book_name, work_root, runner_kwargs,
+                                             true_mm, folder_name=folder_name,
+                                             enable_retry=not args.no_retry)
                 row["book_width_mm_pred"] = round(float(result["book_width_mm_pred"]), 2)
                 row["elapsed_sec"] = result["elapsed_sec"]
+                row["retry_count"] = result["retry_count"]
                 if true_mm is not None:
                     row["abs_error_mm"] = round(abs(row["book_width_mm_pred"] - float(true_mm)), 2)
                 print(f"  -> pred={row['book_width_mm_pred']}mm true={true_mm}mm "
-                      f"err={row['abs_error_mm']} ({result['elapsed_sec']}s)")
+                      f"err={row['abs_error_mm']} retry={row['retry_count']} ({result['elapsed_sec']}s)")
             except Exception as e:  # noqa: BLE001
                 row["error"] = f"{type(e).__name__}: {e}"
                 print(f"  ✗ 失敗: {row['error']}")

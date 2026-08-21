@@ -81,6 +81,19 @@ MIN_KEY_TEXT_LEN_FOR_MATCH = 4
 
 FORCED_ANGLE = 90
 
+# 色補助キー(2026-08-21試験導入)。無地・OCR手がかりの薄い品目(オレンジ箱等)向けの
+# 補助シグナル。マスタ側にcolor_rgbが無い品目は0点になり、他の3キー(ref/display_name/
+# 日付)だけで採点した場合と同じ挙動になる(後方互換、マスタ未対応でも壊れない)。
+COLOR_MAX_DIST = 150.0
+
+# 色キーの中央値センタリング後の値に掛ける減衰係数。多くの品目は白〜グレー系の
+# 似た色なので、素の色スコアだけでも僅かな差でwinning_key/marginの計算を乗っ取り、
+# 本来ref/display_nameで確信度が高いはずのマスクの信頼度表示を壊す実例が確認された
+# (2026-08-21、MC1715000等で確認: 同じマスクが選ばれ続けるのにcolorキーが僅差で
+# argmaxを奪いmargin=-3.1等になり見かけ上confident=Falseになっていた)。
+# 減衰させることで、色がオレンジ箱のように明確に違う場合だけ実際に勝てるようにする。
+COLOR_KEY_WEIGHT = 0.35
+
 
 # ===== 文字列正規化 =====
 
@@ -152,6 +165,24 @@ def _key_score(key: str, combined: str, *, is_date: bool = False) -> float:
     return float(fuzz.partial_ratio(key_norm, combined_norm))
 
 
+def _color_score(mask_rgb, master_rgb, *, max_dist: float = COLOR_MAX_DIST) -> float:
+    """マスクの平均色とマスタの参照色(color_rgb)のユークリッド距離を0〜100に変換する。
+
+    他の3キー(ref/display_name/date)と同じ0〜100スケールに合わせ、後段の
+    列ごと中央値センタリングと同じ仕組みに乗せる。ほとんどの品目は白系パッケージで
+    互いに似た色になるため中央値センタリング後はほぼ0になり、オレンジ箱のように
+    明確に色が違う品目だけが浮き上がる設計(色が万能の識別キーになるわけではない)。
+    """
+    if mask_rgb is None or not master_rgb:
+        return 0.0
+    a = np.asarray(mask_rgb, dtype=np.float64)
+    b = np.asarray(master_rgb, dtype=np.float64)
+    if a.shape != (3,) or b.shape != (3,):
+        return 0.0
+    dist = float(np.linalg.norm(a - b))
+    return max(0.0, 100.0 * (1.0 - dist / max_dist))
+
+
 # ===== マスク・OCRの前処理 =====
 
 def _mask_to_binary(mask, h: int, w: int) -> np.ndarray:
@@ -174,6 +205,34 @@ def _mask_bbox(mask_bin: np.ndarray) -> dict[str, float] | None:
         "x1": float(xs.min()), "y1": float(ys.min()),
         "x2": float(xs.max()), "y2": float(ys.max()),
     }
+
+
+def _mask_mean_rgb(mask_bin: np.ndarray, rgb_img: np.ndarray) -> list[float] | None:
+    """マスク内画素の平均色(R,G,B)。rgb_imgはcv2.imread直後のBGR画像を想定。"""
+    if mask_bin.sum() < 1:
+        return None
+    mean_bgr = rgb_img[mask_bin > 0].mean(axis=0)
+    return [round(float(mean_bgr[2]), 1), round(float(mean_bgr[1]), 1), round(float(mean_bgr[0]), 1)]
+
+
+def _poly_mask_overlap_ratio(poly_pts: np.ndarray, mask_bin: np.ndarray, h: int, w: int) -> float:
+    """OCR文字ポリゴンの面積のうち、実際のマスク輪郭(ピクセル単位)と重なる割合。
+
+    2026-08-21: 従来は矩形バウンディングボックス同士の重なりで判定していたが、
+    棚の箱は微妙に傾いて立っているため隣接マスクの矩形が重なり合い、隣の箱の
+    文字が誤って割り当てられる実例が確認された(query=ESC0305で隣のAXS Vecta 46
+    DACのテキストバケットに"ESC0305"が混入し、confident=Trueで誤選択)。矩形では
+    なく実際のマスク輪郭との重なりで判定することで、傾いた隣接マスク同士が
+    矩形上は重なっていても実体(輪郭)は重ならない場合に正しく区別できる。
+    """
+    canvas = np.zeros((h, w), dtype=np.uint8)
+    pts_int = np.round(poly_pts).astype(np.int32).reshape(-1, 1, 2)
+    cv2.fillPoly(canvas, [pts_int], 1)
+    poly_area = int(canvas.sum())
+    if poly_area <= 0:
+        return 0.0
+    inter = int(np.count_nonzero((canvas > 0) & (mask_bin > 0)))
+    return inter / poly_area
 
 
 def _unrotate_poly(poly, angle: int, w: int, h: int) -> np.ndarray:
@@ -235,14 +294,12 @@ def _collect_mask_texts(
         if area <= 0:
             continue
 
-        # 文字boxの面積のうち、どのマスクbboxに最も多く重なるかで帰属を決める
+        # 文字ポリゴンの面積のうち、どのマスクの実際の輪郭(ピクセル単位)に
+        # 最も多く重なるかで帰属を決める(矩形バウンディングボックスではない。
+        # 理由は_poly_mask_overlap_ratioのdocstring参照)。
         best_i, best_ratio = None, 0.0
-        for i, b in enumerate(boxes):
-            if b is None:
-                continue
-            ox = max(0.0, min(x2, b["x2"]) - max(x1, b["x1"]))
-            oy = max(0.0, min(y2, b["y2"]) - max(y1, b["y1"]))
-            ratio = (ox * oy) / area
+        for i, mb in enumerate(mask_bins):
+            ratio = _poly_mask_overlap_ratio(p, mb, h, w)
             if ratio > best_ratio:
                 best_ratio, best_i = ratio, i
 
@@ -328,6 +385,15 @@ def match_text_to_mask_main(
     combined, boxes, ocr_debug = _collect_mask_texts(ocr_json_path, masks, rgb_path)
     n_mask = len(masks)
 
+    # 色補助キー用: 各マスクの平均色を取っておく(2026-08-21試験導入)。
+    rgb_img_for_color = cv2.imread(str(rgb_path))
+    mask_mean_rgb: list[list[float] | None] = [None] * n_mask
+    if rgb_img_for_color is not None:
+        h_c, w_c = rgb_img_for_color.shape[:2]
+        for i, m in enumerate(masks):
+            mb = _mask_to_binary(m, h_c, w_c)
+            mask_mean_rgb[i] = _mask_mean_rgb(mb, rgb_img_for_color)
+
     master_path = Path(master_json) if master_json else DEFAULT_MASTER_JSON
     if not use_multikey:
         # 現行方式の再現用: query(REF) 1本だけで採点する
@@ -360,18 +426,21 @@ def match_text_to_mask_main(
     # そこで各キーの列から中央値を引いた「その品目らしさの突出度」で比較する。
     # 期限のように全マスクへ一様に高い値を出すキーは、中央値を引くとほぼ0になり、
     # 本当に効いているキーだけが残る。
-    per_key = np.zeros((n_mask, n_master, 3), dtype=np.float64)
+    n_keys = 4  # ref, display_name, date, color(2026-08-21試験導入)
+    per_key = np.zeros((n_mask, n_master, n_keys), dtype=np.float64)
     for i in range(n_mask):
         c = combined[i]
         for j, m in enumerate(master):
             for k, (_, key, is_date) in enumerate(_keys_of(m)):
                 per_key[i, j, k] = _key_score(key, c, is_date=is_date)
+            per_key[i, j, 3] = _color_score(mask_mean_rgb[i], m.get("color_rgb"))
 
     centered = np.zeros_like(per_key)
     for j in range(n_master):
-        for k in range(3):
+        for k in range(n_keys):
             col = per_key[:, j, k]
             centered[:, j, k] = col - (np.median(col) if col.size else 0.0)
+    centered[:, :, 3] *= COLOR_KEY_WEIGHT  # color キーの影響を減衰(理由は定数定義部を参照)
 
     S = centered.max(axis=2)
 
@@ -394,7 +463,7 @@ def match_text_to_mask_main(
     # ===== 信頼度 =====
     # 報告するスコア/marginは「実際に効いたキー」の生スコアで出す。
     # 中央値を引いた値は比較用の内部量で、そのまま出すと意味が読み取れないため。
-    key_names = ["ref", "display_name", "date"]
+    key_names = ["ref", "display_name", "date", "color"]
     col = S[:, target_j]
     if sel_i is not None:
         win_k = int(np.argmax(centered[sel_i, target_j]))
@@ -455,7 +524,7 @@ def match_text_to_mask_main(
                         "score": round(float(raw_col[i]), 1),
                         "by_key": {
                             key_names[k]: round(float(per_key[i, target_j, k]), 1)
-                            for k in range(3)
+                            for k in range(n_keys)
                         },
                         "text": combined[i][:200],
                     }

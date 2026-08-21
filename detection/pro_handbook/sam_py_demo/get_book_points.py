@@ -355,6 +355,14 @@ def save_masked_and_cropped(
     depth_reference_mask01: np.ndarray | None = None,
     depth_reference_name: str = "selected_mask",
     return_info: bool = False,
+    outlier_method: str = "absolute",
+    intr=None,
+    depth_scale: float | None = None,
+    ransac_distance_threshold_m: float = 0.008,
+    ransac_n: int = 3,
+    ransac_num_iterations: int = 1200,
+    ransac_min_total_points: int = 120,
+    ransac_min_reference_points: int = 80,
 ):
     """
     対象書籍のみの RGB/Depth を保存（背景0マスク ＋ 深度外れ値除去）．
@@ -362,6 +370,11 @@ def save_masked_and_cropped(
     Depth外れ値除去の基準値 z_med は，通常は選択マスク全体ではなく，
     depth_reference_mask01 が与えられた場合はその領域内のDepth中央値から求める．
     今回の用途では，OCR文字領域内のDepth中央値を渡す想定．
+
+    outlier_method="ransac_residual" の場合，中央値±固定幅(絶対閾値)の代わりに，
+    refine_mask_by_ransac_spine_plane_after_depth と同じRANSAC平面フィット＋残差で
+    外れ値を判定する(intr/depth_scaleが必須、3D復元に使うため)。点数不足やRANSAC失敗時は
+    絶対閾値方式へフォールバックする。
     """
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -377,6 +390,7 @@ def save_masked_and_cropped(
     info = {
         "used": False,
         "reason": "not initialized",
+        "outlier_method_requested": str(outlier_method),
         "z_tolerance_raw": int(z_tolerance_raw),
         "depth_reference_name_requested": str(depth_reference_name),
         "depth_reference_source_used": None,
@@ -391,24 +405,88 @@ def save_masked_and_cropped(
 
     selected_nonzero = depth_masked[depth_masked > 0]
 
-    # --- Depth中央値を求める参照領域を決める ---
+    if outlier_method == "ransac_residual":
+        if intr is None or depth_scale is None:
+            raise ValueError("outlier_method='ransac_residual' には intr と depth_scale が必須です")
+
+        before_count = int(np.count_nonzero(depth_masked > 0))
+        points_ref = np.empty((0, 3), dtype=np.float64)
+        if depth_reference_mask01 is not None:
+            ref_mask01 = ((np.asarray(depth_reference_mask01) > 0) & (mask01 > 0)).astype(np.uint8)
+            points_ref, _ = _mask_depth_to_points_uv_for_plane_filter(
+                ref_mask01, depth_masked, intr, depth_scale
+            )
+            info["reference_valid_depth_count"] = int(points_ref.shape[0])
+            info["depth_reference_source_used"] = str(depth_reference_name)
+
+        if points_ref.shape[0] >= int(ransac_min_reference_points):
+            fit_points = points_ref
+            plane_source = "ocr_reference_plane"
+        else:
+            fit_points, _ = _mask_depth_to_points_uv_for_plane_filter(mask01, depth_masked, intr, depth_scale)
+            plane_source = "selected_mask_fallback"
+            info["depth_reference_source_used"] = "selected_mask_fallback"
+            info["reference_fallback_reason"] = "reference mask has too few valid depth points"
+
+        points_all, uv_all = _mask_depth_to_points_uv_for_plane_filter(mask01, depth_masked, intr, depth_scale)
+
+        plane_model = None
+        fit_info = None
+        if fit_points.shape[0] >= int(ransac_min_total_points):
+            plane_model, _inliers, fit_info = _fit_plane_ransac_open3d_for_spine(
+                fit_points,
+                distance_threshold_m=float(ransac_distance_threshold_m),
+                ransac_n=int(ransac_n),
+                num_iterations=int(ransac_num_iterations),
+            )
+
+        if plane_model is not None:
+            distances = _point_plane_distance_for_spine(points_all, plane_model)
+            keep = distances <= float(ransac_distance_threshold_m)
+            depth_masked_new = np.zeros_like(depth_masked)
+            uv_keep = uv_all[keep]
+            depth_masked_new[uv_keep[:, 1], uv_keep[:, 0]] = depth_masked[uv_keep[:, 1], uv_keep[:, 0]]
+            depth_masked = depth_masked_new
+            after_count = int(np.count_nonzero(depth_masked > 0))
+            info.update({
+                "used": True,
+                "reason": "ok",
+                "method": "ransac_residual",
+                "plane_source": plane_source,
+                "plane_model": [float(v) for v in np.asarray(plane_model, dtype=np.float64).reshape(4)],
+                "ransac_fit": fit_info,
+                "distance_threshold_m": float(ransac_distance_threshold_m),
+                "removed_pixel_count": int(before_count - after_count),
+                "remaining_pixel_count": int(after_count),
+                "remaining_ratio": float(after_count / max(before_count, 1)),
+            })
+        else:
+            info.update({
+                "method": "ransac_residual_fallback_to_absolute",
+                "reason": "too few points for RANSAC or plane fit failed; falling back to absolute threshold",
+                "ransac_fit": fit_info,
+            })
+            outlier_method = "absolute"
+
+    # --- Depth中央値を求める参照領域を決める(absolute方式、またはRANSACのフォールバック) ---
     ref_values = np.asarray([], dtype=depth_u16.dtype)
-    if depth_reference_mask01 is not None:
-        ref_mask = (np.asarray(depth_reference_mask01) > 0)
-        # OCR領域がマスク外まで広がる場合を避けるため，選択マスク内に制限する．
-        ref_valid = ref_mask & (mask01 > 0) & (depth_u16 > 0)
-        ref_values = depth_u16[ref_valid]
-        info["reference_valid_depth_count"] = int(ref_values.size)
-        info["depth_reference_source_used"] = str(depth_reference_name)
+    if outlier_method == "absolute":
+        if depth_reference_mask01 is not None:
+            ref_mask = (np.asarray(depth_reference_mask01) > 0)
+            # OCR領域がマスク外まで広がる場合を避けるため，選択マスク内に制限する．
+            ref_valid = ref_mask & (mask01 > 0) & (depth_u16 > 0)
+            ref_values = depth_u16[ref_valid]
+            info["reference_valid_depth_count"] = int(ref_values.size)
+            info["depth_reference_source_used"] = str(depth_reference_name)
 
-    # OCR領域にDepthが十分なければ，従来どおり選択マスク全体へフォールバックする．
-    if ref_values.size < 10:
-        ref_values = selected_nonzero
-        info["depth_reference_source_used"] = "selected_mask_fallback"
-        info["reference_valid_depth_count"] = int(ref_values.size)
-        info["reference_fallback_reason"] = "reference mask has too few valid depth pixels"
+        # OCR領域にDepthが十分なければ，従来どおり選択マスク全体へフォールバックする．
+        if ref_values.size < 10:
+            ref_values = selected_nonzero
+            info["depth_reference_source_used"] = "selected_mask_fallback"
+            info["reference_valid_depth_count"] = int(ref_values.size)
+            info["reference_fallback_reason"] = "reference mask has too few valid depth pixels"
 
-    if ref_values.size > 0:
+    if outlier_method == "absolute" and ref_values.size > 0:
         z_med = int(np.median(ref_values))
         z_min_keep = int(z_med - int(z_tolerance_raw))
         z_max_keep = int(z_med + int(z_tolerance_raw))
@@ -441,7 +519,9 @@ def save_masked_and_cropped(
             info["reference_depth_raw_max"] = float(np.max(ref_values))
         except Exception:
             pass
-    else:
+    elif not info.get("used", False):
+        # outlier_method="ransac_residual"が成功した場合はinfo["used"]が既にTrueなので、
+        # ここには絶対閾値方式が使えず(ref_values空)かつRANSACも失敗した場合のみ到達する。
         info["used"] = False
         info["reason"] = "no valid depth in selected mask"
 
@@ -1074,10 +1154,21 @@ def _suppress_side_protrusions_axis_profile(
     return out, info
 
 
+# フォーク(bookp0650-cpu/book)由来: 撮影画像全体を0/+30/-30度回転させて複数回OCRし、
+# 結果をCW90基準座標へ統合するオプション機能(2026-08-21導入・スモークテスト中)。
+# 詳細はOCR/paddle_ocr_dual_angle.py参照。OCR呼び出しが3倍になるため既定は無効(False)。
+# 人間がレビュー・実機検証した上でTrueに切り替える想定。
+USE_DUAL_ANGLE_OCR = False
+
+
 def _resolve_ocr_subprocess_paths():
     ocr_dir = Path(__file__).resolve().parent / "OCR"
     ocr_py = ocr_dir / ".paddle_ocr" / "bin" / "python"
-    ocr_script = ocr_dir / "paddle_ocr_test.py"
+    ocr_script = (
+        ocr_dir / "paddle_ocr_dual_angle.py"
+        if USE_DUAL_ANGLE_OCR
+        else ocr_dir / "paddle_ocr_test.py"
+    )
     if not ocr_py.exists():
         ocr_py = Path(sys.executable)
     else:
@@ -10645,6 +10736,23 @@ def decide_clean_rectangle_override(
     else:
         adopt_reasons.append("selected_ocr_core_preserved")
 
+    # 2026-08-21追加(優先度3): 上記の各ガードは「trimの見た目の安全さ」(keep_ratio・
+    # OCRコア温存等)しか見ておらず、trimが実際に正しいかどうかの独立した参照が無かった。
+    # 実例(M00345100950、component分裂対応後): 元の長方形幅83.05px・seed_width_profile
+    # (OCR幾何から独立に推定した「真の背表紙幅」の目安)は75.9〜82.1pxとほぼ一致していたのに、
+    # shadow候補は52.19pxまで削り込み、他の全ガードを通過してしまい採用された
+    # (真の正解幅44.2mmに対し、元の40.9mmは妥当だったが、採用されたshadowの25.7mmは
+    # 大きく外れていた)。既に計算済みのseed_width_profile_median_pxと比較し、shadowが
+    # これより大幅に狭い場合は「安全に見えるが実際には削りすぎ」として棄却する。
+    seed_width_profile_median_px = _f(analysis.get("seed_width_profile_median_px"))
+    shadow_width_px = _f((shadow.get("shadow_width_info") or {}).get("width_px") if isinstance(shadow.get("shadow_width_info"), dict) else None)
+    if seed_width_profile_median_px is not None and shadow_width_px is not None and seed_width_profile_median_px > 1.0:
+        seed_ratio = shadow_width_px / seed_width_profile_median_px
+        if seed_ratio < 0.75:
+            reject_reasons.append(f"shadow_width_px_far_below_seed_profile_reference={seed_ratio:.3f}")
+        else:
+            adopt_reasons.append(f"shadow_width_px_consistent_with_seed_profile_reference={seed_ratio:.3f}")
+
     width_ratio_original_to_shadow = None
     if original_width is not None and shadow_width is not None:
         width_ratio_original_to_shadow = float(original_width / max(shadow_width, 1e-6))
@@ -11768,6 +11876,74 @@ def merge_ocr_and_masks(
     }
 
 
+def handle_mask_fragmentation_after_depth_prefilter(
+    mask01: np.ndarray,
+    depth_masked: np.ndarray,
+    *,
+    close_kernel_px: int = 15,
+    min_fragment_area_ratio: float = 0.08,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """depth外れ値除去(01)直後のマスク分裂に対する専用ステージ(2026-08-21、優先度1)。
+
+    背景: depth中央値±3cm(または11のRANSAC平面残差)による外れ値除去は画素単位の
+    絶対閾値判定であり、傾いた背表紙表面の勾配や局所ノイズにより、面積の減少幅自体は
+    小さい(5〜9%程度)のに連結成分が1→3等に分裂することがある実例を確認した
+    (component_count>1の22件は平均誤差7.88mm、単一成分の78件は平均5.95mm)。
+    分裂したマスクは③(column_refine)の自動モード選択を不安定にし、リファイン全体の
+    変化量が最終誤差とr=0.578で相関する主要因になっていた。
+
+    対策: (1)まずモルフォロジー的closing(dilate→erode)で、近接する小さな穴・隙間を
+    橋渡しする。これで同一物体の分裂(depthノイズによる局所的な穴)は再結合される一方、
+    真に別の物体(隣の箱等)はclose_kernel_px程度の隙間では橋渡しされないため誤結合し
+    にくい。(2)closing後もなお複数成分が残る場合、最大成分に対してmin_fragment_area_ratio
+    未満の小さい成分だけをノイズとして除去する(大きい方の成分は、分裂が実際には
+    60/40のような対等な分割だった場合に誤って本来の材料を捨てないよう残す)。
+    """
+    info: dict = {
+        "used": False,
+        "component_count_before": 0,
+        "component_count_after_close": 0,
+        "component_count_after_prune": 0,
+        "action": "none",
+        "close_kernel_px": int(close_kernel_px),
+        "min_fragment_area_ratio": float(min_fragment_area_ratio),
+    }
+    mask01 = (np.asarray(mask01) > 0).astype(np.uint8)
+    n_before, labels_before = cv2.connectedComponents(mask01, connectivity=8)
+    info["component_count_before"] = int(n_before - 1)
+    if n_before - 1 <= 1:
+        info["action"] = "skipped_single_component"
+        return mask01, depth_masked, info
+
+    info["used"] = True
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_kernel_px, close_kernel_px))
+    closed = cv2.morphologyEx(mask01, cv2.MORPH_CLOSE, kernel)
+    n_after_close, labels_close = cv2.connectedComponents(closed, connectivity=8)
+    info["component_count_after_close"] = int(n_after_close - 1)
+
+    if n_after_close - 1 <= 1:
+        info["action"] = "merged_by_closing"
+        depth_masked_out = depth_masked.copy()
+        depth_masked_out[closed == 0] = 0
+        info["component_count_after_prune"] = 1
+        return closed.astype(np.uint8), depth_masked_out, info
+
+    # closingでも残った成分は、最大成分に対して小さすぎるものだけノイズとして除去する。
+    areas = [int(np.sum(labels_close == lbl)) for lbl in range(1, n_after_close)]
+    max_area = max(areas) if areas else 0
+    keep_labels = [
+        lbl for lbl, area in zip(range(1, n_after_close), areas)
+        if max_area > 0 and area >= min_fragment_area_ratio * max_area
+    ]
+    pruned = np.isin(labels_close, keep_labels).astype(np.uint8)
+    n_after_prune, _ = cv2.connectedComponents(pruned, connectivity=8)
+    info["component_count_after_prune"] = int(n_after_prune - 1)
+    info["action"] = "closed_and_pruned_small_fragments"
+    depth_masked_out = depth_masked.copy()
+    depth_masked_out[pruned == 0] = 0
+    return pruned, depth_masked_out, info
+
+
 def _run_recognition_core_like_offline(
     *,
     query: str,
@@ -11786,12 +11962,23 @@ def _run_recognition_core_like_offline(
     sam_decoder_k_keep: int = 1,
     sam_target_len: int = 1024,
     depth_merge_tolerance_raw: int = 30,
+    depth_outlier_method: str = "absolute",
+    enable_fragmentation_handling: bool = True,
     show_pointcloud_gui: bool = False,
     save_pointcloud_debug: bool = False,
     save_step_by_step_pointcloud_debug: bool = True,
 ) -> tuple[float, np.ndarray, np.ndarray, Path]:
     """
     online/offline共通の認識コア．
+
+    enable_fragmentation_handling: Depth外れ値除去(01)直後のマスク分裂対応ステージ
+      (handle_mask_fragmentation_after_depth_prefilter)の有効/無効(既定True、A/B比較用、
+      2026-08-21追加、優先度1)。
+
+    depth_outlier_method: 「マスク選択後・長方形判定前」に行うDepth外れ値除去(下記2.)の方式。
+      "absolute"(既定, 従来通り) = 参照領域のDepth中央値±depth_merge_tolerance_raw。
+      "ransac_residual" = RANSAC平面フィット＋残差ベース(save_masked_and_croppedのdocstring参照、
+      A/B比較用、2026-08-21追加)。
 
     重要な仕様:
       1. SAM2とOCRを並列に実行する．
@@ -12009,14 +12196,24 @@ def _run_recognition_core_like_offline(
         depth_reference_mask01=ocr_depth_reference_mask01,
         depth_reference_name="selected_ocr_polygon_intersection_selected_mask",
         return_info=True,
+        outlier_method=str(depth_outlier_method),
+        intr=intr,
+        depth_scale=depth_scale,
     )
     mask01 = ((mask01 > 0) & (depth_masked > 0)).astype(np.uint8)
+
+    fragmentation_info: dict = {"used": False, "action": "disabled"}
+    if enable_fragmentation_handling:
+        mask01, depth_masked, fragmentation_info = handle_mask_fragmentation_after_depth_prefilter(
+            mask01, depth_masked,
+        )
+
     _save_step_projection(
         "01",
         "after_depth_median_pm3cm_prefilter",
         mask01,
         depth_masked,
-        note="選択マスク内のDepth中央値±3cmで外れ値除去した直後．",
+        note="選択マスク内のDepth中央値±3cmで外れ値除去した直後(分裂対応ステージ適用後)．",
     )
     _record_residual_stage(
         "after_depth_prefilter",
@@ -12024,7 +12221,11 @@ def _run_recognition_core_like_offline(
         depth_masked,
         refine_stage=depth_anchor_refine_info,
         column_stage={},
-        extra_info={"stage_id": "01", "depth_filter_detail": depth_filter_detail_info},
+        extra_info={
+            "stage_id": "01",
+            "depth_filter_detail": depth_filter_detail_info,
+            "fragmentation_handling": fragmentation_info,
+        },
     )
 
     # 原因解析用：Depth補正後に残った有効Depth点を色分け保存する．
@@ -12424,6 +12625,12 @@ def _run_recognition_core_like_offline(
                 score -= 2.0 * (0.60 - valid_keep_ratio)
             if valid_keep_ratio > 0.98:
                 score -= 0.15
+
+            if bool(__import__("os").environ.get("DEBUG_COLUMN_SCORE")):
+                sw = info_candidate.get("seed_width_profile_info", {}) if isinstance(info_candidate, dict) else {}
+                print(f"[DEBUG_COLUMN_SCORE] score={score:.3f} width_median_px={shape_candidate.get('width_median_px')} "
+                      f"seed_width_selected_px={sw.get('width_selected_px') if isinstance(sw, dict) else None} "
+                      f"valid_keep_ratio={valid_keep_ratio:.3f}", flush=True)
 
             return float(score), shape_candidate
 
@@ -13054,6 +13261,21 @@ def _run_recognition_core_like_offline(
 
     target_point_info = find_target_point(pts_f)
     target_point = target_point_info.get("target_m")
+    if target_point is None:
+        # 2026-08-21発見(ed): find_target_pointは点群のY方向レンジがy_offset_m(既定80mm)
+        # 未満だと候補点0件でtarget_m=Noneを返すが、呼び出し側はNone非対応でfloat()時に
+        # クラッシュしていた(小さい品目・RANSAC残差除去で点群レンジが縮んだ場合に発生)。
+        # find_target_point自体の80mm前提を変えるのはリスクがあるため、呼び出し側で
+        # 点群重心へフォールバックし、クラッシュせず処理を継続できるようにする。
+        pts_f_arr = np.asarray(pts_f)
+        if pts_f_arr.size > 0:
+            target_point = pts_f_arr.reshape(-1, 3).mean(axis=0)
+            target_point_info = dict(target_point_info)
+            target_point_info["fallback_used"] = "centroid_due_to_target_m_none"
+        else:
+            target_point = np.zeros(3, dtype=np.float64)
+            target_point_info = dict(target_point_info)
+            target_point_info["fallback_used"] = "zero_due_to_empty_point_cloud"
 
     residual_guard_diagnostics = _summarize_residual_guard_info(column_info)
     residual_final_width_info = {
@@ -13297,6 +13519,8 @@ def run_capture_and_pca_offline(
     sam_decoder_k_keep: int = 1,
     sam_target_len: int = 1024,
     depth_merge_tolerance_raw: int = 30,
+    depth_outlier_method: str = "absolute",
+    enable_fragmentation_handling: bool = True,
     show_pointcloud_gui: bool = False,
     save_pointcloud_debug: bool = False,
     save_step_by_step_pointcloud_debug: bool = True,
@@ -13348,6 +13572,8 @@ def run_capture_and_pca_offline(
         sam_decoder_k_keep=sam_decoder_k_keep,
         sam_target_len=sam_target_len,
         depth_merge_tolerance_raw=depth_merge_tolerance_raw,
+        depth_outlier_method=depth_outlier_method,
+        enable_fragmentation_handling=enable_fragmentation_handling,
         show_pointcloud_gui=show_pointcloud_gui,
         save_pointcloud_debug=save_pointcloud_debug,
         save_step_by_step_pointcloud_debug=save_step_by_step_pointcloud_debug,
