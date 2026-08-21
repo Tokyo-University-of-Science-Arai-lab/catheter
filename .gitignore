@@ -72,8 +72,13 @@ xarm_current_logs/
 xarm7/xarm_current_logs/
 *.log
 
-# catheter-100 accuracy eval outputs (large: images/Excel/depth captures, ~12GB)
-reco/
+# catheter-100 accuracy eval: exclude only the heavy generated data (images/depth/excel,
+# many GB across width_eval_work*/ variants); keep scripts/ and small review artifacts
+reco/*/width_eval_work*/
+reco/*/depth_shots/
+reco/*/images/
+reco/*/width_eval_report/
+reco/*/outputs/
 
 # Local installers and archives
 *.deb

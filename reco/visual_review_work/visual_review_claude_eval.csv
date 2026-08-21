@@ -1,0 +1,71 @@
+shot,dataset,verdict,note
+1__10CSW12612,stand-100,F,実際はGuidePost(REF KMDA044178)の箱を測定していた
+1__612104,stand-100,T,Target XL(REF 612104)を正しく測定
+1__C1775ST,stand-100,F,実際はCHIKAI(ASAHI INTECC)の箱を測定していた
+1__ESC0305,stand-100,F,実際はPhenom 160cm(REF F013160-0615-13、隣のMedtronicブランド箱)を測定していた
+1__EZAS3021,stand-100,T,Neuroform Atlas(REF EZAS3021)を正しく測定
+1__FG13160-0615-1S,stand-100,F,実際はEsperance Distal Access Catheterの箱を測定していた
+1__INC-11814-146,stand-100,F,実際はExcelsior XT-17(REF C1775ST)の箱を測定していた
+1__M00345100950,stand-100,F,実際は隣接するAXS Vecta 46系の箱を測定していた(オレンジの箱ではない)
+1__MC1715000,stand-100,F,実際はSynchro SELECT(REF SSTD215STR)の箱を測定していた
+1__SSTD215STR,stand-100,F,実際はSurpass Evolve(REF FD45017)の箱を測定していた
+2__10CSW12612,stand-100,F,実際はSurpass Evolveの箱を測定していた
+2__612104,stand-100,T,Target XL(REF 612104)を正しく測定
+2__C1775ST,stand-100,F,カテーテル箱ではなく無関係の漫画本(シーケンス制御の本)の縁を測定していた
+2__ESC0305,stand-100,F,実際は同じ「TransForm」ブランドだが別製品のTransForm407(REF ESC0407)を測定していた
+2__EZAS3021,stand-100,F,実際はTransForm407(REF ESC0407)を測定していた
+2__FG13160-0615-1S,stand-100,F,実際はEsperance Distal Access Catheterの箱を測定していた
+2__INC-11814-146,stand-100,T,AXS Vecta 46(REF INC-11814-146、非DAC版)を正しく測定
+2__M00345100950,stand-100,F,実際はAXS Vecta 46 DAC(REF INC-11814-125)の箱を測定していた
+2__MC1715000,stand-100,F,実際はSynchro SELECTの箱を測定していた
+2__SSTD215STR,stand-100,F,実際はCHIKAI(ASAHI INTECC)の箱を測定していた
+3__10CSW12612,stand-100,T,Wallaby Avenir Coil Systemを正しく測定
+3__612104,stand-100,F,実際はStars2 HR(ASAHI INTECC)の箱を測定していた
+3__C1775ST,stand-100,F,実際はGuidePost(REF KMDA044178)の箱を測定していた
+3__ESC0305,stand-100,F,実際はAXS Vecta 46 DAC(REF INC-11814-125)の箱を測定していた
+3__EZAS3021,stand-100,F,実際はWallaby Avenir Coil Systemの箱を測定していた
+3__FG13160-0615-1S,stand-100,F,実際はExcelsior XT-27(REF XT275081)の箱を測定していた
+3__INC-11814-146,stand-100,F,カテーテル箱ではなく無関係の漫画本の縁を測定していた
+3__M00345100950,stand-100,F,実際はNeuroform Atlas(REF EZAS3021)の箱を測定していた
+3__MC1715000,stand-100,F,実際はSurpass Evolveの箱を測定していた
+3__SSTD215STR,stand-100,F,実際はTarget XL(REF 612104)の箱を測定していた
+4__10CSW12612,stand-100,F,実際はTransForm305(REF ESC0305)の箱を測定していた
+4__612104,stand-100,F,実際はStars2 HR(ASAHI INTECC)の箱を測定していた
+4__C1775ST,stand-100,F,実際はオレンジのStryker箱(M00345100950)を測定していた
+4__ESC0305,stand-100,F,実際はSurpass Evolve(REF FD45017)の箱を測定していた
+4__EZAS3021,stand-100,F,実際はSynchro SELECT(REF SSTD215STR)の箱を測定していた
+4__FG13160-0615-1S,stand-100,F,実際はNeuroform Atlas(REF EZAS3021)の箱を測定していた
+4__INC-11814-146,stand-100,F,実際はRiptide Large Bore Aspiration Tubing(REF MAT-110-110)の箱を測定していた
+4__M00345100950,stand-100,F,実際はTarget XL(REF 612104)の箱を測定していた
+4__MC1715000,stand-100,F,実際はExcelsior XT-17(REF C1775ST)の箱を測定していた
+4__SSTD215STR,stand-100,F,実際はEsperance Distal Access Catheterの箱を測定していた
+5__10CSW12612,stand-100,F,実際はSurpass Evolveの箱を測定していた
+5__612104,stand-100,F,実際はPhenom 160cm(REF F013160-0615-13)の箱を測定していた
+5__C1775ST,stand-100,F,実際はTransForm407(REF ESC0407)の箱を測定していた
+5__ESC0305,stand-100,F,実際はCHIKAI(ASAHI INTECC)の箱を測定していた
+5__EZAS3021,stand-100,F,実際はAXS Vecta 46(REF INC-11814-146)の箱を測定していた
+5__FG13160-0615-1S,stand-100,F,実際はEsperance Distal Access Catheterの箱を測定していた
+5__INC-11814-146,stand-100,F,実際はAXS Vecta 46 DAC(REF INC-11814-125)の箱を測定していた
+5__M00345100950,stand-100,F,実際はTarget XL(REF 612104)の箱を測定していた
+5__MC1715000,stand-100,F,実際はTransForm305(REF ESC0305)の箱を測定していた
+5__SSTD215STR,stand-100,F,実際はTransForm305(REF ESC0305)の箱を測定していた
+AXS_DAC_L,diagonal-40,T,AXS Vecta 46 DAC(REF INC-11814-125)を正しく測定
+AXS_L,diagonal-40,F,実際はGuidePost(REF KMDA044178、TransForm305の裏に隠れた箱)を測定していた
+CHIKAI_L,diagonal-40,F,実際はAXS Vecta 46 DAC(REF INC-11814-125)の箱を測定していた
+Esperance_L,diagonal-40,F,実際はTransForm407(REF ESC0407)の箱を測定していた
+Excelsior SL-10_L,diagonal-40,T,Excelsior SL-10(箱表記REF 168189、queryのbook_name「1681189」とは末尾桁がずれているが製品としては一致)を正しく測定
+Excelsior XT-27_L,diagonal-40,F,実際はSynchro SELECT(REF SSTD215STR)の箱を測定していた
+Excelsior-XT-17_L,diagonal-40,F,実際はGuidePost(REF KMDA044178)の箱を測定していた
+Guidepost_L,diagonal-40,F,実際はWallaby Avenir Coil Systemの箱を測定していた
+Phenom_L,diagonal-40,F,実際はNeuroform Atlas(REF EZAS3021)の箱を測定していた
+Ripride_L,diagonal-40,F,実際はExcelsior XT-27(REF XT275081)の箱を測定していた
+SHOURYU2_L,diagonal-40,F,実際はWallaby Avenir Coil Systemの箱を測定していた
+Surpass_L,diagonal-40,F,実際はSHOURYU2 HR(ASAHI INTECC)の箱を測定していた
+Synchro_L,diagonal-40,F,実際はWallaby Avenir Coil Systemの箱を測定していた
+Target_L,diagonal-40,F,実際はPhenom 160cm(REF F013160-0615-13)の箱を測定していた
+Transform305_L,diagonal-40,F,実際はEsperance Distal Access Catheterの箱を測定していた
+Transform_L,diagonal-40,F,実際はExcelsior XT-17(REF C1775ST)の箱を測定していた
+Wallaby_L,diagonal-40,F,実際はTransForm305(REF ESC0305)の箱を測定していた
+neuroform_L,diagonal-40,F,実際はAXS Vecta 46(REF INC-11814-146)の箱を測定していた
+orange_L,diagonal-40,F,実際はAXS Vecta 46(REF INC-11814-146)の箱を測定していた
+pNOVUS_L,diagonal-40,F,実際はオレンジのStryker箱(M00345100950)を測定していた

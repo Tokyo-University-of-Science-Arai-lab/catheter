@@ -1,0 +1,71 @@
+verdict,selected_score,margin,confident,ocr_text_len,ocr_text,dataset,shot
+F,42.9,2.9,False,8,50-40-40,stand-100,1__10CSW12612
+T,66.7,9.5,False,12,7X 20-20-000,stand-100,1__612104
+F,0.0,-66.7,False,0,,stand-100,1__C1775ST
+F,66.7,4.2,False,16,9011-202 -1200 2,stand-100,1__ESC0305
+T,0.0,-53.3,False,0,,stand-100,1__EZAS3021
+F,0.0,-53.3,False,0,,stand-100,1__FG13160-0615-1S
+F,50.0,-7.1,False,10,00-10-8202,stand-100,1__INC-11814-146
+F,61.5,-5.1,False,7,9100 94,stand-100,1__M00345100950
+F,72.7,-27.3,False,6,13 000,stand-100,1__MC1715000
+F,0.0,-42.9,False,0,,stand-100,1__SSTD215STR
+F,66.7,0.0,False,2,ww,stand-100,2__10CSW12612
+T,62.5,0.0,False,16,7X 20-50-0000 09,stand-100,2__612104
+F,0.0,-50.0,False,0,,stand-100,2__C1775ST
+F,75.0,17.9,False,12,82-01-1202 7,stand-100,2__ESC0305
+F,50.0,11.9,False,4,O1 a,stand-100,2__EZAS3021
+F,0.0,-62.5,False,0,,stand-100,2__FG13160-0615-1S
+T,40.0,0.0,False,7,9100 94,stand-100,2__INC-11814-146
+F,61.5,-38.5,False,7,9100 94,stand-100,2__M00345100950
+F,66.7,0.0,False,6,00.0 U,stand-100,2__MC1715000
+F,0.0,-50.0,False,0,,stand-100,2__SSTD215STR
+T,0.0,-50.0,False,0,,stand-100,3__10CSW12612
+F,62.5,0.0,False,19,VINVX 10-00-6200 82,stand-100,3__612104
+F,62.5,12.5,False,17,5oapin 52-00-4200,stand-100,3__C1775ST
+F,62.5,0.0,False,20,SZ-N 22-60-8202 9100,stand-100,3__ESC0305
+F,66.7,16.7,False,4,2 01,stand-100,3__EZAS3021
+F,0.0,-50.0,False,0,,stand-100,3__FG13160-0615-1S
+F,60.0,10.0,False,6,aWSr 二,stand-100,3__INC-11814-146
+F,100.0,40.0,True,2,00,stand-100,3__M00345100950
+F,0.0,-50.0,False,0,,stand-100,3__MC1715000
+F,66.7,33.3,False,2,TX,stand-100,3__SSTD215STR
+F,66.7,16.7,False,2,ww,stand-100,4__10CSW12612
+F,62.5,-4.2,False,17,VVINVS 10-00-6200,stand-100,4__612104
+F,57.1,3.8,False,23,5079540 241000 OS001WNd,stand-100,4__C1775ST
+F,0.0,-66.7,False,0,,stand-100,4__ESC0305
+F,42.9,2.9,False,13,438 00.0 9221,stand-100,4__EZAS3021
+F,50.0,7.1,False,6,338 00,stand-100,4__FG13160-0615-1S
+F,0.0,-66.7,False,0,,stand-100,4__INC-11814-146
+F,44.4,-5.6,False,8,1X 0 aNn,stand-100,4__M00345100950
+F,0.0,-57.1,False,0,,stand-100,4__MC1715000
+F,0.0,-42.9,False,1,同,stand-100,4__SSTD215STR
+F,66.7,-33.3,False,2,ww,stand-100,5__10CSW12612
+F,60.0,0.0,False,12,011- S -1200,stand-100,5__612104
+F,100.0,0.0,False,1,7,stand-100,5__C1775ST
+F,0.0,-62.5,False,0,,stand-100,5__ESC0305
+F,62.5,5.4,False,14,6290-8202 9100,stand-100,5__EZAS3021
+F,0.0,-53.3,False,0,,stand-100,5__FG13160-0615-1S
+F,66.7,4.2,False,14,2-60-8002 9900,stand-100,5__INC-11814-146
+F,57.1,-1.2,False,4,00 图,stand-100,5__M00345100950
+F,50.0,-50.0,False,4,7X 0,stand-100,5__MC1715000
+F,100.0,70.0,True,1,S,stand-100,5__SSTD215STR
+T,66.7,4.2,False,18,Z2-600202 900 ww 9,diagonal-40,AXS_DAC_L
+F,0.0,-40.0,False,0,,diagonal-40,AXS_L
+F,76.9,5.5,False,18,Z2-60-8202 9100 97,diagonal-40,CHIKAI_L
+F,53.3,3.3,False,10,9210020 wu,diagonal-40,Esperance_L
+T,61.5,-5.1,False,17,00-00-0200 681001,diagonal-40,Excelsior SL-10_L
+F,53.3,-9.2,False,16,5079548 22-00420,diagonal-40,Excelsior XT-27_L
+F,100.0,66.7,True,1,S,diagonal-40,Excelsior-XT-17_L
+F,0.0,-50.0,False,0,,diagonal-40,Guidepost_L
+F,0.0,-50.0,False,0,,diagonal-40,Phenom_L
+F,50.0,10.0,False,4,dili,diagonal-40,Ripride_L
+F,0.0,-60.0,False,0,,diagonal-40,SHOURYU2_L
+F,57.1,-5.4,False,19,VIINVY 1C-00-6202 0,diagonal-40,Surpass_L
+F,0.0,-42.9,False,0,,diagonal-40,Synchro_L
+F,60.0,5.5,False,7,S -1200,diagonal-40,Target_L
+F,66.7,4.2,False,15,5011-202 ONN 01,diagonal-40,Transform305_L
+F,62.5,-4.2,False,19,00-21-1202 ANDIVUAS,diagonal-40,Transform_L
+F,33.3,-66.7,False,5,ww ww,diagonal-40,Wallaby_L
+F,62.5,9.2,False,15,62-90-8202 9100,diagonal-40,neuroform_L
+F,61.5,11.5,False,7,9100 94,diagonal-40,orange_L
+F,50.0,0.0,False,6,9600WN,diagonal-40,pNOVUS_L

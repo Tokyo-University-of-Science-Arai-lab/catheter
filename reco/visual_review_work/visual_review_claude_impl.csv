@@ -1,0 +1,19 @@
+shot,dataset,verdict,note
+1__1681189,stand-100,T,highlighted box correctly shows Excelsior SL-10
+1__FD45017,stand-100,F,highlighted box is TransForm SC SUPER COMPLIANT not Surpass Evolve
+1__SS2-40-070H,stand-100,F,highlighted box is pNOVUS 17 Microcatheter not SHOURYU2
+2__DAC6F115,stand-100,F,highlighted box is Excelsior XT-27 not Esperance
+2__KMDA044178,stand-100,F,highlighted box is pNOVUS 17 Microcatheter not Guidepost
+3__1681189,stand-100,T,highlighted box correctly shows Excelsior SL-10
+3__FD45017,stand-100,F,highlighted box is TransForm SC SUPER COMPLIANT not Surpass Evolve
+3__SS2-40-070H,stand-100,F,highlighted box is Medtronic Rapidlite tubing not SHOURYU2
+4__DAC6F115,stand-100,F,highlighted box shows CHIKAI text not Esperance
+4__KMDA044178,stand-100,F,highlighted box is pNOVUS 17 Microcatheter not Guidepost
+5__1681189,stand-100,T,highlighted box correctly shows Excelsior SL-10
+5__FD45017,stand-100,F,highlighted box is a different Stryker/Japanese-label box not Surpass Evolve
+5__SS2-40-070H,stand-100,F,highlighted box is Excelsior XT-17 not SHOURYU2
+CHIKAI_R,diagonal-40,F,highlighted box is AXS Vecta 46 DAC not CHIKAI (CHIKAI visible elsewhere in frame)
+Excelsior-XT-17_R,diagonal-40,F,highlighted box at far right edge does not match Excelsior XT-17 shown centrally
+SHOURYU2_R,diagonal-40,T,highlighted box text appears to read SHOURYU2/Storyu2 HR (some uncertainty, partial occlusion)
+Transform305_R,diagonal-40,F,highlighted box is AXS Vecta 46 DAC not TransForm305
+orange_R,diagonal-40,F,highlighted box is TransForm SC SUPER COMPLIANT not the orange Stryker box
