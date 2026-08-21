@@ -85,7 +85,7 @@ lint やユニットテストの仕組みはない。検証は実機試験と上
 
 取り出し1回の処理の流れ（`Retrieval_integration.py` の `main_sequence()` が統括）:
 
-1. **撮影・認識**: `detection/pro_handbook/sam_py_demo/get_book_points.py` の `run_capture_and_pca()` — RealSense 撮影 → SAM（ONNX、モデルは `models/sam_vit_h_*.onnx`、推論は `infer_for_retrival.py` / `infer_for_storage.py`）でマスク → depth+intrinsics で点群化（Open3D）→ PCA で背表紙の姿勢・幅を推定。OCR による書名照合は `sam_py_demo/OCR/`（別 venv の PaddleOCR をワーカー経由で使う）。
+1. **撮影・認識**: `detection/pro_handbook/sam_py_demo/get_book_points.py` の `run_capture_and_pca()` — RealSense 撮影 → SAM（**SAM3サービス経由がデフォルト・唯一の実行パス**。`BOOK_SEGMENTATION_BACKEND`環境変数のデフォルト値が`"sam3"`固定で、それ以外を指定すると`RuntimeError`になる＝ONNX/SAM2への自動フォールバックは無効化済み。`models/sam_vit_h_*.onnx`を使う`infer_for_retrival.py`/`infer_for_storage.py`はレガシー経路で、"fixed-image parity"のサインオフまでの移行期参考実装として残っているだけで実行時には通らない。詳細は`get_book_points.py`の`_get_sam_runner_compat()`）でマスク → depth+intrinsics で点群化（Open3D）→ PCA で背表紙の姿勢・幅を推定。OCR による書名照合は `sam_py_demo/OCR/`（別 venv の PaddleOCR をワーカー経由で使う）。
 2. **座標変換**: `xarm7/control/robot_base_coordinate.py`（`PoseChain`, `cam_mm_to_robot_mm`）でカメラ座標系→ロボット座標系。ハンドアイキャリブレーション関連は `xarm7/` 直下（`save_pose_pair.py`, `calibration_valid*.py`, `tcp_pivot_calibration.py`）。
 3. **アーム制御**: `xarm7/control/xarm7.py`（`XArm7` クラス、xArm Python SDK は `xarm7/xArm-Python-SDK` に同梱）。waypoint 再生は `xarm_init_to_capture_integration.py` の `WaypointPlayerNode`。
 4. **ハンド制御**: `Dynamixel_win_pro_hand_book/HandBook_Retrieval.py` / `HandBook_Storage.py`。ハンドは3軸（グリッパ・回転・直動）の Dynamixel 構成。
