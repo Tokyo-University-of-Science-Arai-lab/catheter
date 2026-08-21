@@ -78,14 +78,17 @@ def image_filename_for(dataset: str, shot: str, display_name: str, work_dir_name
     stand-100のshot名は"<画像番号>__<book_nameコード>"(例: 1__ESC0305)で
     コードが読みにくいため、display_nameベースの名前に置き換える。
 
-    stand-100は、実際に解決された作業フォルダ名(work_dir_name、例: `1-1-Target_XL`)を
-    そのまま使う(2026-08-21、ユーザー要望: 「images内の画像の命名規則もフォルダと
-    同様にしてください」)。こうすることで区切り文字も含めてworkフォルダ名と常に
-    一致することが保証される(別々にsafe_name組み立てをやり直すと表記がずれる恐れが
-    あるため、単一のソース=work_dir.nameから作る)。
+    stand-100・diagonal-40とも、実際に解決された作業フォルダ名(work_dir_name、例:
+    `1-1-Target_XL`・`23-AXS_DAC_L`)をそのまま使う(2026-08-21/22、ユーザー要望:
+    「images内の画像の命名規則もフォルダと同様にしてください」)。こうすることで
+    区切り文字も含めてworkフォルダ名と常に一致することが保証される(別々に
+    safe_name組み立てをやり直すと表記がずれる恐れがあるため、単一のソース=
+    work_dir.nameから作る)。
     """
+    if work_dir_name:
+        return f"{work_dir_name}.png"
     if dataset == "stand-100":
-        return f"{work_dir_name or safe_name(display_name or shot)}.png"
+        return f"{safe_name(display_name or shot)}.png"
     return f"{safe_name(shot)}.png"
 
 
@@ -95,6 +98,8 @@ def resolve_work_dir(base_dir: Path, dataset: str, shot: str, display_name: str 
     stand-100のwidth_eval_work_rotfixは、shot名(`{画像番号}__{REF}`)のまま
     ではなく`{認識番号}-{画像番号}-{display_name}`形式にリネーム済み(2026-08-21、
     別タスクで実施)なので、直接一致しない場合はこのパターンでフォールバック探索する。
+    diagonal-40も2026-08-22から作業フォルダ名の先頭に処理順を付けるようになった
+    (`{処理順}-{shot名}`)ため、同様にフォールバック探索する。
 
     【2026-08-21 重大バグ修正】画像番号のみ(例: `^\\d+-1-`)で前方一致させていたため、
     同じ画像番号を共有する20件全部が同じフォルダ(ソート順で最初に見つかったもの)に
@@ -117,6 +122,18 @@ def resolve_work_dir(base_dir: Path, dataset: str, shot: str, display_name: str 
             return matches[0]
         if len(matches) > 1:
             print(f"⚠ resolve_work_dir: shot={shot} display_name={display_name!r} に対して"
+                  f"複数候補が一致し一意に決まりません: {[m.name for m in matches]}")
+    elif dataset == "diagonal-40":
+        expected = safe_name(shot)
+        pattern = re.compile(rf"^\d+-{re.escape(expected)}$")
+        matches = [
+            cand for cand in (sorted(base_dir.iterdir()) if base_dir.exists() else [])
+            if cand.is_dir() and pattern.match(cand.name)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            print(f"⚠ resolve_work_dir: shot={shot} に対して"
                   f"複数候補が一致し一意に決まりません: {[m.name for m in matches]}")
     return direct
 

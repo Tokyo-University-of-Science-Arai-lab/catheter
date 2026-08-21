@@ -74,7 +74,7 @@ xarm7/xarm_current_logs/
 
 # catheter-100 accuracy eval: exclude only the heavy generated data (images/depth/excel,
 # many GB across width_eval_work*/ variants); keep scripts/ and small review artifacts
-reco/*/width_eval_work*/
+reco/*/*work*/
 reco/*/depth_shots/
 reco/*/images/
 reco/*/width_eval_report/

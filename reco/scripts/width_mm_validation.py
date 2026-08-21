@@ -390,6 +390,11 @@ def main() -> None:
             if args.dataset == "stand-100":
                 image_id = shot_name.split("__", 1)[0]
                 folder_name = f"{i + 1}-{image_id}-{safe_name(row['display_name'] or shot_name)}"
+            else:
+                # diagonal-40は1画像=1アイテムで画像番号の概念が無いため、
+                # {処理順}-{shot名}とする(2026-08-22、ユーザー要望:
+                # stand-100と同様に処理順をフォルダ名の先頭に付けてほしい)。
+                folder_name = f"{i + 1}-{safe_name(shot_name)}"
             try:
                 result = run_one_with_retry(shot_name, src_dir, book_name, work_root, runner_kwargs,
                                              true_mm, folder_name=folder_name,
