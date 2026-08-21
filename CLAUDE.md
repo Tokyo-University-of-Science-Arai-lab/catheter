@@ -97,6 +97,19 @@ lint やユニットテストの仕組みはない。検証は実機試験と上
 - `xarm7/control/xarm_monitor.py` の `XArmMonitor` は異常検知時に **`os._exit(1)` でプロセスを即時強制終了する**。例外では捕捉できない。ケース途中でプロセスが死ぬのは想定内の挙動で、`performance_test_runner.py` はこれを前提に progress.json と `--resume-dir` による再開・分類を実装している。
 - `Retrieval_integration.py` は SIGINT でハンドを閉じてから xArm を緊急停止するハンドラを登録している。
 
+## 認識精度の研究（catheter-100 SAM評価）
+
+`catheter-100`データセット（棚画像5枚+正解アノテーション、`~/ダウンロード/catheter_test80/`側にある）に
+対して本番SAMモデルで実際に認識を行い、IoU精度・書籍幅(px)精度・識別精度（`multikey_matcher.py`/
+`match_eval.py`のマルチキー+ハンガリー法照合）を測定した。評価一式（Excel・オーバーレイ画像・
+サマリ）や関連データセットは **`reco/`** 配下に集約している（`reco/README.md`が索引、
+`reco/stand-100/`が今回の80件評価、`reco/diagonal-40/`が斜め置きデータセット）。
+depth付き実撮影データも`reco/*/depth_shots/`に追加済みで、`get_book_points.py`本番の
+実mm幅計測パイプライン（SAM3サービス経由）による検証も2026-08-21に実施済み（結果は
+`reco/*/width_eval_summary.md`）。環境まわりの既知の地雷（旧`infer_for_retrival.py`の
+importバグ、SAM3サービス設定パス破損、PaddleOCRモデル欠落等）は2026-08-21に修正済み。
+詳細と再現手順は**`HANDOFF_20260820_catheter100_sam_eval.md`**を参照。
+
 ## その他の注意
 
 - `control` はリポジトリ直下から `xarm7/control` へのシンボリックリンク。

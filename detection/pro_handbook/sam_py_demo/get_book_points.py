@@ -37,7 +37,7 @@ import os
 import sys
 import csv
 from .OCR.only_one import find_similar_books
-from .OCR.only_one_tilted import match_text_to_mask_main
+from catheter.scripts.multikey_matcher import match_text_to_mask_main
 from .infer_for_storage import SamConfig, SamBatchInfer_storage, StageSaveCfg
 from modules.overlay_io import _render_overlay_bgr, _save_points_and_overlay
 from modules.pointcloud_utils import masked_depth_to_points, save_ply_ascii
@@ -3382,6 +3382,38 @@ def refine_mask_by_spine_column_length_after_depth(
     return (mask_after, depth_after, info) if return_info else (mask_after, depth_after)
 
 def save_spine_column_length_debug(
+    shot_dir: Path,
+    color_np: np.ndarray,
+    mask_before: np.ndarray,
+    mask_after: np.ndarray,
+    depth_before: np.ndarray,
+    depth_after: np.ndarray,
+    column_info: dict | None,
+    stem: str,
+):
+    """デバッグ画像保存のみを行うため、失敗しても認識処理自体は止めない。
+
+    _save_spine_column_length_debug_impl内でt_bins等のローカル変数が未定義の
+    まま参照されるバグがあり(2026-08-21発見、未修正)、呼び出されると毎回
+    NameErrorになる。デバッグ出力の欠落だけで済ませ、幅計測など本体の処理を
+    継続させるためここで例外を吸収する。
+    """
+    try:
+        _save_spine_column_length_debug_impl(
+            shot_dir=shot_dir,
+            color_np=color_np,
+            mask_before=mask_before,
+            mask_after=mask_after,
+            depth_before=depth_before,
+            depth_after=depth_after,
+            column_info=column_info,
+            stem=stem,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠ save_spine_column_length_debug failed (debug output only, ignored): {e}")
+
+
+def _save_spine_column_length_debug_impl(
     shot_dir: Path,
     color_np: np.ndarray,
     mask_before: np.ndarray,

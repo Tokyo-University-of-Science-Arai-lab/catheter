@@ -119,7 +119,7 @@ class StageSaveCfg:
     save_after_smooth: bool = True
     save_selected: bool = True
     save_rectangular: bool = True
-from infer_for_storage import SamBatchInfer_storage
+from .infer_for_storage import SamBatchInfer_storage
 
 class SamBatchInfer_retrieval:
     def __init__(self, cfg: SamConfig):

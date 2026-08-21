@@ -127,13 +127,9 @@ import time
 
 # PaddleX 3.3.12 reads these flags while its modules are imported.  Keep them
 # local to this OCR process and set them before importing PaddleOCR.
-OCR_DETECTION_MODEL_DIR = Path(
-    "/home/book/.paddlex/official_models/PP-OCRv5_server_det"
-)
-OCR_RECOGNITION_MODEL_DIR = Path(
-    "/home/book/.paddlex/official_models/PP-OCRv5_server_rec"
-)
-OCR_VISUALIZATION_FONT = Path("/home/book/.paddlex/fonts/simfang.ttf")
+OCR_DETECTION_MODEL_DIR = Path.home() / ".paddlex" / "official_models" / "PP-OCRv5_server_det"
+OCR_RECOGNITION_MODEL_DIR = Path.home() / ".paddlex" / "official_models" / "PP-OCRv5_server_rec"
+OCR_VISUALIZATION_FONT = Path.home() / ".paddlex" / "fonts" / "simfang.ttf"
 OCR_REQUIRED_MODEL_FILES = (
     "inference.json",
     "inference.pdiparams",

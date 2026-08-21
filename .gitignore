@@ -72,6 +72,9 @@ xarm_current_logs/
 xarm7/xarm_current_logs/
 *.log
 
+# catheter-100 accuracy eval outputs (large: images/Excel/depth captures, ~12GB)
+reco/
+
 # Local installers and archives
 *.deb
 *.run
