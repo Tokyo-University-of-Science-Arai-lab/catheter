@@ -107,6 +107,32 @@ python3 -m Dynamixel_win_pro_hand_book.id_1_gripper_pos_check
 python -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
 
 
+##オフライン認識##
+# 本番と同じ簡易版パイプラインで評価（これが既定、基本の使い方）
+python reco/scripts/width_mm_validation.py --dataset stand-100
+python reco/scripts/width_mm_validation.py --dataset diagonal-40
+
+python reco/scripts/build_width_eval_report.py --suffix _20260822_1xxxxx
+
+# 従来の複雑なパイプラインと比較したい場合
+python reco/scripts/width_mm_validation.py --dataset stand-100 --pipeline legacy --label legacy_ab
+
+オプション
+--label <名前>	実行に分かりやすい名前を付ける（例:--label test1、結果フォルダ名に付与）
+--only <shot名>	1件だけ試す（動作確認用）
+--limit N	先頭N件だけ試す
+--no-retry	誤差5mm以上でのリトライを無効化
+--no-fragmentation-handling	マスク分裂対応を無効化（比較用）
+--verbose	詳細ログ表示
+
+
+#認識古いやつ
+python recognition_accuracy_test.py
+
+
+
+
+##開口幅調整
 python calibrate_gripper.py
 
 python -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
@@ -114,8 +140,6 @@ python -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
 source /opt/ros/humble/setup.bash
 source ros2_ws/install/setup.bash
 
-#認識
-python recognition_accuracy_test.py
 
 #撮影
 python3 capture_burst.py
