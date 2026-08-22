@@ -6,8 +6,8 @@ from pathlib import Path
 from detection.pro_handbook.sam3_runtime.integration_service_manager import (
     Sam3ServiceSession,
 )
-from detection.pro_handbook.sam_py_demo.get_book_points_no_mask_merge_no_side_filter import (
-    run_capture_and_pca_no_mask_merge_no_side_filter,
+from detection.pro_handbook.sam_py_demo.get_book_points_sam3_refined_sam2_width import (
+    run_capture_and_pca_sam3_refined_sam2_width as run_capture_and_pca_no_mask_merge_no_side_filter,
 )
 from xarm7.control.move_to_container_test import Move_to_Container
 from xarm7.control.shelf_id_manager import ShelfIDManager

@@ -288,3 +288,110 @@ CSV/Excelに`retry_count`列を追加済み。オレンジ箱(識別自体が破
 テストでは3回ともRANSAC失敗→フォールバックとなり改善が無かったが、これは想定通りの
 挙動(識別が機能していない極端ケース)として確認済み。100件全体でのretry発動率・改善率は
 7.4/7.5のA/B比較と合わせて今後まとめる。
+
+## 8. 本番パイプラインの切替とsimilarity_scores.json恒久バグの修正 (2026-08-22)
+
+### 8.1 実際の本番エントリポイントの正しい理解(重要な訂正)
+
+これまで本ドキュメント・作業の一部で`Retrieval_integration.py`を「本番のメインスクリプト」
+として扱っていたが、**これは誤りだった**。ユーザーによる訂正:
+
+> `Retrieval_integration.py`は今は使っていません。メインは`Retrieval_integration_SAM3.py`
+> (AMRを使う場合)と`R_I_SAM3_C.py`(AMRを使わず、コンテナ収納もしない)です。
+
+以後、認識ロジックを変更する際は**この2ファイルを対象にすること**。`Retrieval_integration.py`
+は現在使われていない旧スクリプトであり、変更を加える意味が薄い(このドキュメントの8.4で、
+誤ってこちらを変更してしまった経緯とその訂正を記録している)。
+
+### 8.2 旧パイプライン(9段階の複雑な後処理)と新パイプライン(4段階)の違い
+
+背景: ユーザーから「フォーク(bookp0650-cpu/book)は2mm以内90%以上だったはず、比較して
+ほしい」との指摘を受け調査した結果、フォークが使っていた実装は、我々の`get_book_points.py`
+の`run_capture_and_pca`(以下「旧パイプライン」)とは異なる、意図的に単純化された実装
+(以下「新パイプライン」)だった。実測(reco/データ、stand-100・diagonal-40)で新パイプライン
+の方が大幅に精度が高いことを確認し、本番を新パイプラインへ切り替えた。
+
+**旧パイプライン**(`get_book_points.py`の`run_capture_and_pca`/`run_capture_and_pca_offline`、
+内部で`_run_recognition_core_like_offline`を共有):
+
+1. SAM3が"book spine"プロンプトでマスク生成 → OCRとマッチングして対象マスク選択(識別)
+2. depth中央値±3cmで外れ値除去(または`ransac_residual`方式)。2026-08-21に
+   `handle_mask_fragmentation_after_depth_prefilter()`でマスク分裂対応ステージを追加
+3. OCR軸中心帯で背表紙内部の欠けを補完
+4. **長方形判定**: マスクが既に綺麗な長方形なら5-9をスキップし、代わりに
+   "shadow candidate"(3.等)で置き換えるかどうかを別途評価する
+   (`decide_clean_rectangle_override`、2026-08-21に過剰トリム防止ガードを追加)
+5. (長方形でない場合)背表紙方向の列長フィルタ(`column_refine`)。複数モードを自動スコアで選択
+6. `seed_width_guard_false`選択時の安全網(`final_t_width_clip`)でOCR由来の推定幅を基準に追加クリップ
+7. 列長フィルタで削った側の短列を追加除去(`one_sided_short_column_prune`)
+8. OCR文字領域から推定した平面でRANSAC外れ点除去
+9. RANSAC平面上a方向95%点だけ残す列長フィルタ、`estimate_book_width_from_filtered_mask_axis`
+   でp2-p98パーセンタイル幅を算出
+
+このうち4〜9が、2026-08-21に複数のバグ(OCR輪郭混入・マスク分裂・過剰トリム等、6.7節参照)
+を作り込んでいた複雑な後処理群。
+
+**新パイプライン**(`get_book_points_sam3_refined_sam2_width.py`の
+`run_capture_and_pca_sam3_refined_sam2_width`、内部で`get_book_points_sam3_refined_median_depth.py`
+の`mode="refine_only"`を経由):
+
+1. SAM3マスク選択(識別)。`from . import get_book_points as current`として現行の
+   `get_book_points.py`をそのままimportし`current.merge_ocr_and_masks()`で識別しているため、
+   OCR輪郭ベース識別・色補助キー等の識別改善はそのまま引き継がれる
+2. depth中央値±3cmフィルタ(`current.save_masked_and_cropped`をそのまま再利用)
+3. RANSAC平面フィット**1回のみ**(`_fit_plane_ransac_open3d_for_spine`、閾値8mm)。
+   失敗時はsilent fallbackせず`RuntimeError`で素直に失敗扱いにする
+4. PCA/幅算出。`estimate_sam2_compatible_geometry(..., geometry_mode="sam2_width_only")`
+   でp2-p98パーセンタイル幅を算出(旧パイプラインの最終幅算出とほぼ同じ考え方だが、
+   4〜9の複雑な後処理を一切経由しない)
+
+**実測比較**(reco/データ、リトライ機構なし):
+
+| | stand-100 MAE/2mm以内 | diagonal-40 MAE/2mm以内 |
+|---|---|---|
+| 修正前(`2f3706a`、識別モジュール導入直後) | 6.38mm / 3.0% | 7.43mm / 2.5% |
+| 旧パイプライン+識別・幅推定バグ修正後(`ff01c8a`) | 5.88mm / 9.0% | 6.37mm / 5.0% |
+| **新パイプラインへ切替後(`76ee2a7`、現本番)** | **2.86mm / 62.0%** | **3.44mm / 52.5%** |
+
+例外: `MC1715000`(pNOVUS)だけは新パイプラインの方が悪化する(旧パイプラインの側面除去が
+効いていた可能性)。全体としては圧倒的にプラスで、140件中クラッシュ0件。
+
+### 8.3 similarity_scores.json依存の恒久的クラッシュバグの発見と修正
+
+新パイプラインへの統合を進める中で、`get_book_points_no_mask_merge_no_side_filter.py`の
+`run_capture_and_pca_no_mask_merge_no_side_filter`(新パイプラインとは別の、もう1つの
+簡易版実装で、独自のPCAスライスベース幅計算を使う)を試験的に評価したところ、全件
+`FileNotFoundError: similarity_scores.json`でクラッシュした。
+
+調査の結果、`similarity_scores.json`は**コードベース全体で書き込んでいる箇所が一切なく**
+(`_read_json()`はエラーハンドリング無しで`path.read_text()`を直接呼ぶ)、`multikey_matcher.py`
+導入前の旧識別スコアリングモジュール(`only_one_tilted.py`等)が生成していた成果物名の
+名残と判明した。ライブ撮影経路もこの同じoffline関数を内部で呼ぶため、**この関数を使う
+限り実機では毎回必ずクラッシュする、恒久的な欠陥**だった。
+
+確認したところ、**実際に本番で使われる`Retrieval_integration_SAM3.py`(9-10・588行目)と
+`R_I_SAM3_C.py`(14-15・842行目)の両方が、この壊れた関数を直接使っていた**。つまり
+最新のコードで実機を動かすと、認識のたびに必ずクラッシュしていた可能性が高い
+(今回の一連の作業で壊したのではなく、`multikey_matcher.py`導入(2f3706a前後)以降
+ずっと壊れたまま気づかれていなかったと考えられる)。
+
+**修正**: 両ファイルのimportを、8.2の新パイプライン(`get_book_points_sam3_refined_sam2_width.py`
+の`run_capture_and_pca_sam3_refined_sam2_width`)へエイリアス経由で差し替えた
+(呼び出し側の588行目・842行目は戻り値シグネチャが完全一致するため無変更):
+
+```python
+from detection.pro_handbook.sam_py_demo.get_book_points_sam3_refined_sam2_width import (
+    run_capture_and_pca_sam3_refined_sam2_width as run_capture_and_pca_no_mask_merge_no_side_filter,
+)
+```
+
+### 8.4 Retrieval_integration.pyへの変更は誤りだったため撤回
+
+8.1の訂正が判明する前、上記と同様の切替を`Retrieval_integration.py`(6行目)にも行っていたが、
+このファイルは実際には使われていないと判明したため、**元の状態(`get_book_points.py`の
+`run_capture_and_pca`)に復元した**。今後この件に触れる際は、`Retrieval_integration_SAM3.py`・
+`R_I_SAM3_C.py`の2ファイルを対象にすること。
+
+3ファイルとも`py_compile`での構文確認・ランタイムでのimport解決確認は実施済み。**ただし
+rclpy等の実機依存のため、このセッションからは実機を使った統合テストは未実施。実機環境
+での最終確認が必要。**
