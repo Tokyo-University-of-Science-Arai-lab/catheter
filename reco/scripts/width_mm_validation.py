@@ -344,6 +344,11 @@ def main() -> None:
     ap.add_argument("--no-fragmentation-handling", action="store_true",
                     help="②(depth prefilter)直後のマスク分裂対応ステージを無効化する"
                          "(A/B比較用、2026-08-21追加、優先度1)。省略時は有効。")
+    ap.add_argument("--no-report", action="store_true",
+                    help="認識完了後の自動レポート生成(build_width_eval_report.py相当、"
+                         "reco_result_<日時>/にxlsx+images+work symlink)を無効化する。"
+                         "省略時は自動生成される(2026-08-22、ユーザー要望: 「認識を回したら"
+                         "同時にreco_result_.../のようなレポートも作られるようにしてほしい」)。")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -476,6 +481,20 @@ def main() -> None:
             f.flush()
 
     print(f"\n✔ 結果 -> {out_csv}")
+
+    if not args.no_report:
+        # reco/scripts/ 内の build_width_eval_report.py を呼び、この実行のsuffixから
+        # そのままxlsx+images+work symlink付きのreco_result_<日時>/を作る
+        # (2026-08-22、ユーザー要望: 認識実行と同時にレポートも生成してほしい)。
+        try:
+            from build_width_eval_report import build_dataset_report
+            report_timestamp = time.strftime("%Y%m%d_%H%M%S")
+            build_dataset_report(args.dataset, suffix=args.work_suffix, report_timestamp=report_timestamp)
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠ レポート自動生成に失敗しました(認識結果CSV自体は保存済みです): "
+                  f"{type(e).__name__}: {e}")
+            if args.verbose:
+                traceback.print_exc()
 
 
 if __name__ == "__main__":
