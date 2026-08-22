@@ -33,6 +33,22 @@ diagonal-40は1画像=1アイテムで曖昧さがないため、work_root直下
     .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset stand-100
     .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset stand-100 --label rotfix
     .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset diagonal-40 --only Target_R --verbose
+
+【2026-08-22追加】--pipeline {simplified,legacy}
+    本番採用した簡易版パイプライン(get_book_points_sam3_refined_sam2_width.py、SAM3マスク選択
+    →depth外れ値除去→RANSAC平面フィット1回→SAM2互換幅算出の4段階、詳細はHANDOFF 8.2節参照)と、
+    従来の複雑なパイプライン(get_book_points.py、07column_refine等9段階の後処理)を切り替えられる。
+    既定は"simplified"(=現在Retrieval_integration_SAM3.py・R_I_SAM3_C.pyが実際に使っているものと
+    同じ)。旧パイプラインでA/B比較したい場合は--pipeline legacyを指定する。
+    --sam-pts-side・--depth-outlier-method・--no-fragmentation-handlingは旧パイプライン専用の
+    オプションで、--pipeline simplifiedと併用すると警告を出して無視される(簡易版にはこれらに
+    相当する後処理ステージ自体が無いため)。リトライ機構のバリエーション(RETRY_VARIANTS)も
+    パイプラインごとに別内容(下記コード参照)。
+
+    .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset stand-100
+        (既定で--pipeline simplified、本番と同じ挙動を評価)
+    .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset stand-100 --pipeline legacy --label legacy_ab
+        (旧パイプラインとのA/B比較用)
 """
 from __future__ import annotations
 
@@ -175,20 +191,35 @@ def prepare_shot_files(src_dir: Path, work_dir: Path) -> Path:
 
 
 def run_one(shot_name: str, src_dir: Path, query_book_name: str, work_root: Path,
-            runner_kwargs: dict, folder_name: str | None = None) -> dict:
-    from detection.pro_handbook.sam_py_demo.get_book_points import run_capture_and_pca_offline
-
+            runner_kwargs: dict, folder_name: str | None = None, pipeline: str = "simplified") -> dict:
+    """pipeline="legacy" は get_book_points.py(9段階の複雑な後処理、A/B比較用)、
+    pipeline="simplified" は get_book_points_sam3_refined_sam2_width.py(本番採用済み、
+    4段階、HANDOFF 8.2節参照)を呼ぶ。呼び出し先の関数シグネチャ・戻り値形式が異なるため
+    ここで吸収し、呼び出し元には統一した辞書を返す。
+    """
     work_dir = work_root / (folder_name or shot_name)
     prepare_shot_files(src_dir, work_dir)
 
     t0 = time.time()
-    theta_rad, target_point, book_width_mm, out_dir = run_capture_and_pca_offline(
-        query=query_book_name,
-        shot_dir=work_dir,
-        encoder_path=str(SAM_ENCODER),
-        decoder_path=str(SAM_DECODER),
-        **runner_kwargs,
-    )
+    if pipeline == "legacy":
+        from detection.pro_handbook.sam_py_demo.get_book_points import run_capture_and_pca_offline
+        theta_rad, target_point, book_width_mm, out_dir = run_capture_and_pca_offline(
+            query=query_book_name,
+            shot_dir=work_dir,
+            encoder_path=str(SAM_ENCODER),
+            decoder_path=str(SAM_DECODER),
+            **runner_kwargs,
+        )
+    else:
+        from detection.pro_handbook.sam_py_demo.get_book_points_sam3_refined_sam2_width import (
+            run_capture_and_pca_offline_sam3_refined_sam2_width,
+        )
+        result = run_capture_and_pca_offline_sam3_refined_sam2_width(
+            query=query_book_name,
+            shot_dir=work_dir,
+            **runner_kwargs,
+        )
+        book_width_mm = result["pred_book_width_mm"]
     elapsed = time.time() - t0
     return {
         "shot": shot_name,
@@ -227,28 +258,42 @@ def run_one(shot_name: str, src_dir: Path, query_book_name: str, work_root: Path
 # (誤差<5mmになった時点で以降の試行は打ち切る)。
 WIDTH_ERROR_RETRY_THRESHOLD_MM = 5.0
 MAX_RETRIES = 3
-RETRY_VARIANTS: list[dict] = [
+
+# legacyパイプライン用: depth外れ値除去(②)の方式・許容幅を変えながら試す
+# (詳細は上のコメント・HANDOFFを参照)。
+RETRY_VARIANTS_LEGACY: list[dict] = [
     {"depth_outlier_method": "ransac_residual"},
     {"depth_outlier_method": "absolute", "depth_merge_tolerance_raw": 45},
     {"depth_outlier_method": "ransac_residual", "depth_merge_tolerance_raw": 45},
 ]
 
+# simplifiedパイプライン用(2026-08-22追加): 簡易版にはdepth_outlier_methodという
+# 選択肢自体が無く(depth中央値フィルタ→RANSAC平面フィット1回、の固定構成)、
+# 唯一の調整可能パラメータはdepth_merge_tolerance_raw(depth中央値±Xmmの許容幅、
+# 既定30=±3cm)のみ。そのため単純にこの許容幅を段階的に広げるだけの3段階とする。
+RETRY_VARIANTS_SIMPLIFIED: list[dict] = [
+    {"depth_merge_tolerance_raw": 45},
+    {"depth_merge_tolerance_raw": 60},
+    {"depth_merge_tolerance_raw": 90},
+]
+
 
 def run_one_with_retry(shot_name: str, src_dir: Path, query_book_name: str, work_root: Path,
                         runner_kwargs: dict, true_mm, folder_name: str | None = None,
-                        enable_retry: bool = True) -> dict:
-    """abs_error_mmがWIDTH_ERROR_RETRY_THRESHOLD_MM以上ならRETRY_VARIANTSを順に試し、
-    正解幅に最も近かった結果を採用する。true_mmが無い場合はリトライせず1回だけ実行する
-    (正解が分からないと「改善したか」を判定できないため)。
+                        enable_retry: bool = True, pipeline: str = "simplified") -> dict:
+    """abs_error_mmがWIDTH_ERROR_RETRY_THRESHOLD_MM以上なら、pipelineに応じた
+    RETRY_VARIANTS_*を順に試し、正解幅に最も近かった結果を採用する。true_mmが無い場合は
+    リトライせず1回だけ実行する(正解が分からないと「改善したか」を判定できないため)。
 
     各試行は同じfolder_name配下を上書きするのではなく、末尾に_attempt{N}を付けた
     別フォルダに保存する(どの試行がどんな結果だったか後から確認できるようにするため)。
     """
+    retry_variants = RETRY_VARIANTS_LEGACY if pipeline == "legacy" else RETRY_VARIANTS_SIMPLIFIED
 
     def _try(kwargs: dict, attempt_idx: int) -> tuple[dict, float | None]:
         suffix = "" if attempt_idx == 0 else f"_attempt{attempt_idx}"
         fname = f"{folder_name}{suffix}" if folder_name else f"{shot_name}{suffix}"
-        result = run_one(shot_name, src_dir, query_book_name, work_root, kwargs, folder_name=fname)
+        result = run_one(shot_name, src_dir, query_book_name, work_root, kwargs, folder_name=fname, pipeline=pipeline)
         pred = float(result["book_width_mm_pred"])
         err = abs(pred - float(true_mm)) if true_mm is not None else None
         return result, err
@@ -257,7 +302,7 @@ def run_one_with_retry(shot_name: str, src_dir: Path, query_book_name: str, work
     retry_count = 0
 
     if enable_retry and true_mm is not None and best_err is not None and best_err >= WIDTH_ERROR_RETRY_THRESHOLD_MM:
-        for variant in RETRY_VARIANTS[:MAX_RETRIES]:
+        for variant in retry_variants[:MAX_RETRIES]:
             retry_count += 1
             merged = {**runner_kwargs, **variant}
             result, err = _try(merged, retry_count)
@@ -276,6 +321,10 @@ def main() -> None:
     ap.add_argument("--only", default=None, help="このshot名だけ処理する(スモークテスト用)")
     ap.add_argument("--limit", type=int, default=None, help="先頭N件だけ処理する")
     ap.add_argument("--sam-device", default="gpu")
+    ap.add_argument("--pipeline", default="simplified", choices=["simplified", "legacy"],
+                    help="simplified(既定): 本番採用済みの簡易版パイプライン"
+                         "(get_book_points_sam3_refined_sam2_width.py)。"
+                         "legacy: 従来の複雑なパイプライン(get_book_points.py、A/B比較用)。")
     ap.add_argument("--sam-pts-side", default=None,
                     help="get_book_points.pyのsam_pts_sideを上書きする(例: 64,16)。"
                          "省略時はパイプライン既定値(32,8)のまま。")
@@ -306,21 +355,33 @@ def main() -> None:
 
     master_by_bookname = load_master()
 
-    runner_kwargs = dict(
-        sam_device=args.sam_device,
-        interactive=False,
-        use_persistent_runtime=True,
-        show_pointcloud_gui=False,
-        save_pointcloud_debug=False,
-        save_step_by_step_pointcloud_debug=False,
-    )
-    if args.sam_pts_side:
-        a, b = args.sam_pts_side.split(",")
-        runner_kwargs["sam_pts_side"] = (int(a), int(b))
-    if args.depth_outlier_method:
-        runner_kwargs["depth_outlier_method"] = args.depth_outlier_method
-    if args.no_fragmentation_handling:
-        runner_kwargs["enable_fragmentation_handling"] = False
+    legacy_only_flags_used = args.sam_pts_side or args.depth_outlier_method or args.no_fragmentation_handling
+    if args.pipeline == "simplified" and legacy_only_flags_used:
+        print("⚠ --sam-pts-side/--depth-outlier-method/--no-fragmentation-handlingは"
+              "旧パイプライン(--pipeline legacy)専用のオプションです。"
+              "簡易版パイプラインにはこれらに相当する後処理ステージが無いため無視します。")
+
+    if args.pipeline == "legacy":
+        runner_kwargs = dict(
+            sam_device=args.sam_device,
+            interactive=False,
+            use_persistent_runtime=True,
+            show_pointcloud_gui=False,
+            save_pointcloud_debug=False,
+            save_step_by_step_pointcloud_debug=False,
+        )
+        if args.sam_pts_side:
+            a, b = args.sam_pts_side.split(",")
+            runner_kwargs["sam_pts_side"] = (int(a), int(b))
+        if args.depth_outlier_method:
+            runner_kwargs["depth_outlier_method"] = args.depth_outlier_method
+        if args.no_fragmentation_handling:
+            runner_kwargs["enable_fragmentation_handling"] = False
+    else:
+        # simplifiedパイプライン(get_book_points_sam3_refined_sam2_width.py)は
+        # query/shot_dir以外にsam_device・depth_merge_tolerance_raw等ごく僅かな
+        # キーワード引数しか受け付けない(encoder_path/interactive等は存在しない)。
+        runner_kwargs = dict(sam_device=args.sam_device)
 
     dataset_dir = RECO_ROOT / args.dataset
     depth_shots_dir = dataset_dir / "depth_shots"
@@ -398,7 +459,7 @@ def main() -> None:
             try:
                 result = run_one_with_retry(shot_name, src_dir, book_name, work_root, runner_kwargs,
                                              true_mm, folder_name=folder_name,
-                                             enable_retry=not args.no_retry)
+                                             enable_retry=not args.no_retry, pipeline=args.pipeline)
                 row["book_width_mm_pred"] = round(float(result["book_width_mm_pred"]), 2)
                 row["elapsed_sec"] = result["elapsed_sec"]
                 row["retry_count"] = result["retry_count"]
