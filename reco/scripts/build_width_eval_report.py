@@ -37,6 +37,8 @@ import shutil
 import time
 from pathlib import Path
 
+import cv2
+import numpy as np
 from openpyxl import Workbook
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
@@ -45,18 +47,31 @@ from openpyxl.styles import Font, Alignment, PatternFill
 RECO_ROOT = Path(__file__).resolve().parents[1]
 DATASETS = ["stand-100", "diagonal-40"]
 
+# データセットごとのCVAT/COCO形式アノテーション(GTポリゴン、IoU一致度の算出に使う)。
+ANNOTATIONS_JSON = {
+    "stand-100": RECO_ROOT / "stand-100" / "annotations" / "instances_default_100.json",
+    "diagonal-40": RECO_ROOT / "diagonal-40" / "annotations" / "instances_default.json",
+}
+
+# パイプラインごとに最終選択マスクの保存ファイル名が異なる(2026-08-22判明:
+# simplifiedパイプラインはfinal_mask.pngを作らずselected_mask_refined.pngを使う)。
+# 存在する方を優先順に試す。
+SELECTED_MASK_FILENAMES = ["selected_mask_refined.png", "final_mask.png", "selected_mask_raw.png"]
+
 HEADERS = [
     "認識した順番", "画像ファイル", "shot", "query(book_name)", "display_name",
+    "目視確認(T/F)", "IoU一致度",
     "正解幅mm", "推定幅mm", "誤差mm", "2mm以内(把持成功目安)", "リトライ回数",
     "識別スコア", "識別margin", "識別確信度(confident)", "認識した文字列",
-    "処理時間sec", "目視確認(T/F)", "メモ", "エラー",
+    "処理時間sec", "メモ", "エラー",
 ]
 COLUMN_WIDTHS = {
     "認識した順番": 12, "画像ファイル": 42, "shot": 20, "query(book_name)": 16,
-    "display_name": 26, "正解幅mm": 10, "推定幅mm": 10, "誤差mm": 10,
+    "display_name": 26, "目視確認(T/F)": 14, "IoU一致度": 12,
+    "正解幅mm": 10, "推定幅mm": 10, "誤差mm": 10,
     "2mm以内(把持成功目安)": 18, "リトライ回数": 12, "識別スコア": 12, "識別margin": 12,
     "識別確信度(confident)": 16, "認識した文字列": 40, "処理時間sec": 12,
-    "目視確認(T/F)": 14, "メモ": 24, "エラー": 20,
+    "メモ": 24, "エラー": 20,
 }
 
 
@@ -156,6 +171,128 @@ def recognized_text_for_selected_mask(debug: dict) -> str:
     return ""
 
 
+def decode_uncompressed_rle(counts: list[int], height: int, width: int) -> np.ndarray:
+    """COCOの非圧縮RLE(countsがintのリスト)を0/255マスクにデコードする。列優先(Fortran順)で
+    0/1が交互に続くランレングス形式(reco/stand-100/scripts/compare_quad_fit.pyの同名関数と同じ)。"""
+    flat = np.zeros(height * width, dtype=np.uint8)
+    idx = 0
+    val = 0
+    for c in counts:
+        if c:
+            flat[idx: idx + c] = val * 255
+        idx += c
+        val = 1 - val
+    return flat.reshape((height, width), order="F")
+
+
+def segmentation_to_mask(segmentation, height: int, width: int) -> np.ndarray:
+    """COCOセグメンテーション(ポリゴン形式 or 非圧縮RLE形式)を0/255マスクにラスタライズする。"""
+    if isinstance(segmentation, dict):
+        counts = segmentation["counts"]
+        if isinstance(counts, str):
+            raise NotImplementedError(
+                "圧縮RLE(countsが文字列)は未対応です(pycocotools未導入のため)。"
+            )
+        return decode_uncompressed_rle(counts, height, width)
+
+    mask = np.zeros((height, width), dtype=np.uint8)
+    for part in segmentation:
+        pts = np.array(part, dtype=np.float64).reshape(-1, 2)
+        pts = np.round(pts).astype(np.int32).reshape(-1, 1, 2)
+        cv2.fillPoly(mask, [pts], 255)
+    return mask
+
+
+def load_gt_masks_by_image(dataset: str) -> dict[str, list[np.ndarray]]:
+    """アノテーションJSON(CVAT/COCO形式)を読み、画像を特定するキー->GTマスク一覧、を返す。
+
+    stand-100は画像ファイル名が"1.png"〜"5.png"なのでキーは画像番号("1"等)、
+    diagonal-40は画像ファイル名がshot名そのもの("AXS_DAC_L.png"等)なのでキーはshot名。
+    1画像につき複数(stand-100は20個/枚)のGTポリゴンがあるので、IoU一致度は
+    「選択マスクと、その画像内の全GTポリゴンとの最大IoU」とする(2026-08-22、
+    ユーザー要望: 「目視確認の右隣にIoU一致度を入れたい」。個々のGTがどのbook_nameに
+    対応するかの正解ラベル付けは無いため、識別の正誤とは独立に「セグメンテーション
+    そのものの幾何精度」を見る指標として算出する)。
+    """
+    ann_path = ANNOTATIONS_JSON.get(dataset)
+    if not ann_path or not ann_path.exists():
+        return {}
+    try:
+        d = json.loads(ann_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    images_by_id = {img["id"]: img for img in d.get("images", [])}
+    anns_by_image_id: dict[int, list] = {}
+    for ann in d.get("annotations", []):
+        anns_by_image_id.setdefault(ann["image_id"], []).append(ann)
+
+    result: dict[str, list[np.ndarray]] = {}
+    for image_id, img in images_by_id.items():
+        file_name = img.get("file_name", "")
+        key = Path(file_name).stem  # "1.png"->"1", "AXS_DAC_L.png"->"AXS_DAC_L"
+        h, w = img.get("height"), img.get("width")
+        if not h or not w:
+            continue
+        masks = []
+        for ann in anns_by_image_id.get(image_id, []):
+            seg = ann.get("segmentation")
+            if not seg:
+                continue
+            try:
+                mask = segmentation_to_mask(seg, h, w)
+                # annotations/(images/*.png)はdepth_shots側と180度向きが異なる
+                # (2026-08-21、ユーザー確認済み: depth_shotsが本来正しい向きで、
+                # annotations側の方を回転させる必要がある。実測でも無回転だと
+                # 最良IoUが0.357、180度回転後は0.882まで跳ね上がることを確認済み)。
+                mask = np.rot90(mask, 2)
+                masks.append(mask)
+            except NotImplementedError as e:
+                print(f"⚠ GTアノテーション(id={ann.get('id')})のIoU算出をスキップ: {e}")
+        result[key] = masks
+    return result
+
+
+def gt_image_key_for_shot(dataset: str, shot: str) -> str:
+    if dataset == "stand-100" and "__" in shot:
+        return shot.split("__", 1)[0]
+    return shot
+
+
+def load_selected_mask(work_dir: Path) -> np.ndarray | None:
+    for name in SELECTED_MASK_FILENAMES:
+        p = work_dir / name
+        if p.exists():
+            m = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+            if m is not None:
+                return m
+    return None
+
+
+def compute_iou(mask_a: np.ndarray, mask_b: np.ndarray) -> float | None:
+    a = mask_a > 0
+    b = mask_b > 0
+    if a.shape != b.shape:
+        return None
+    inter = np.logical_and(a, b).sum()
+    union = np.logical_or(a, b).sum()
+    if union == 0:
+        return None
+    return float(inter) / float(union)
+
+
+def best_iou_for_row(dataset: str, shot: str, work_dir: Path,
+                      gt_masks_by_image: dict[str, list[np.ndarray]]) -> float | None:
+    gt_masks = gt_masks_by_image.get(gt_image_key_for_shot(dataset, shot))
+    if not gt_masks:
+        return None
+    selected = load_selected_mask(work_dir)
+    if selected is None:
+        return None
+    ious = [iou for gt in gt_masks if (iou := compute_iou(selected, gt)) is not None]
+    return max(ious) if ious else None
+
+
 def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str = "") -> None:
     """suffixを指定すると、入力データは width_eval_result{suffix}.csv /
     width_eval_work{suffix}/ から読む(2026-08-21、回転バグ修正版=_rotfixを反映する際に追加)。
@@ -195,6 +332,8 @@ def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str =
             Path(os.path.relpath(work_base_dir, out_dir)), target_is_directory=True
         )
 
+    gt_masks_by_image = load_gt_masks_by_image(dataset)
+
     for r in rows:
         shot = r["shot"]
         work_dir = resolve_work_dir(work_base_dir, dataset, shot, r.get("display_name", ""))
@@ -203,6 +342,7 @@ def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str =
         r["_margin"] = debug.get("margin")
         r["_confident"] = debug.get("confident")
         r["_recognized_text"] = recognized_text_for_selected_mask(debug)
+        r["_iou"] = best_iou_for_row(dataset, shot, work_dir, gt_masks_by_image)
 
         img_filename = image_filename_for(dataset, shot, r.get("display_name", ""), work_dir.name)
         src = work_dir / "final.png"
@@ -237,6 +377,8 @@ def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str =
             r["shot"],
             r.get("query", ""),
             r.get("display_name", ""),
+            "",
+            (round(r["_iou"], 3) if r["_iou"] is not None else ""),
             true_mm,
             pred_mm,
             err_mm,
@@ -247,7 +389,6 @@ def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str =
             ("" if r["_confident"] is None else str(r["_confident"])),
             r["_recognized_text"],
             to_float(r.get("elapsed_sec")),
-            "",
             "",
             r.get("error", ""),
         ])
