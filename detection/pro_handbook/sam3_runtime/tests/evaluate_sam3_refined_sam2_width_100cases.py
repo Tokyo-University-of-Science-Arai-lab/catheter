@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from detection.pro_handbook.sam_py_demo.modules.sam2_compatible_geometry import (
+    MASK_PCA_WIDTH_MODE_GLOBAL,
     estimate_sam2_compatible_geometry,
 )
 
@@ -134,6 +135,7 @@ def main():
                     points,
                     camera,
                     selected_axis=refinement.get("axis_uv"),
+                    mask_width_mode=MASK_PCA_WIDTH_MODE_GLOBAL,
                     current_geometry=current,
                     geometry_mode="sam2_width_only",
                     debug_dir=debug_dir if index in FOCUS else None,

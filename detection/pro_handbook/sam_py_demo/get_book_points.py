@@ -11747,11 +11747,17 @@ def merge_ocr_and_masks(
     shot_dir: Path,
     interactive: bool = True,
     threshold: int = 40,
+    master_json: str | Path | None = None,
 ):
     """
     OCR 結果(json) と SAM マスクを統合して、選択マスクを返す。
+
+    master_json: 省略時はmultikey_matcher.pyのDEFAULT_MASTER_JSON(カテーテル用マスタ)を使う。
+    書籍等、別のマスタで識別したい場合はここに明示的にパスを渡す(2026-08-22追加。省略時に
+    カテーテル用マスタへ無条件フォールバックし、書籍クエリが全件「マスタに無い」扱いになる
+    バグを修正)。
     """
-    results = match_text_to_mask_main(query, masks, shot_dir, threshold=threshold)
+    results = match_text_to_mask_main(query, masks, shot_dir, threshold=threshold, master_json=master_json)
 
     book_name = results[0]["name"] if results else None
 

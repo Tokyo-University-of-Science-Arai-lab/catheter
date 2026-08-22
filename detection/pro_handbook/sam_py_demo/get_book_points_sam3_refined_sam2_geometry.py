@@ -12,6 +12,7 @@ from .get_book_points_sam3_refined_median_depth import (
 )
 from .modules.sam2_compatible_geometry import (
     GEOMETRY_MODES,
+    MASK_PCA_WIDTH_MODE_GLOBAL,
     estimate_sam2_compatible_geometry,
 )
 
@@ -48,6 +49,7 @@ def run_capture_and_pca_offline_sam3_refined_sam2_geometry(
     geometry = estimate_sam2_compatible_geometry(
         mask, rgb, depth, points, camera,
         selected_axis=refinement.get("axis_uv"),
+        mask_width_mode=MASK_PCA_WIDTH_MODE_GLOBAL,
         current_geometry={
             "roll_rad": current["roll_rad"],
             "width_mm": current["pred_book_width_mm"],

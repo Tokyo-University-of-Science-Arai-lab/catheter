@@ -14,6 +14,7 @@ import numpy as np
 
 from detection.pro_handbook.sam_py_demo.modules.sam2_compatible_geometry import (
     GEOMETRY_MODES,
+    MASK_PCA_WIDTH_MODE_GLOBAL,
     estimate_sam2_compatible_geometry,
 )
 
@@ -128,6 +129,7 @@ def main():
                     result = estimate_sam2_compatible_geometry(
                         mask, rgb, depth, points, camera,
                         selected_axis=refinement.get("axis_uv"),
+                        mask_width_mode=MASK_PCA_WIDTH_MODE_GLOBAL,
                         current_geometry=current,
                         geometry_mode=mode,
                         debug_dir=mode_dir,
@@ -297,6 +299,7 @@ def reproduce_saved_sam2_case81():
     axis = saved["book_width_info"]["axis"]
     result = estimate_sam2_compatible_geometry(
         mask, rgb, depth, points, camera, selected_axis=axis,
+        mask_width_mode=MASK_PCA_WIDTH_MODE_GLOBAL,
         current_geometry={
             "roll_rad": saved["theta_rad"], "width_mm": saved["book_width_mm"],
             "target_point_m": saved["p_min_m"],

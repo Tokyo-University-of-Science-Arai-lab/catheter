@@ -493,6 +493,7 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
     depth_merge_tolerance_raw=30,
     prepared=None,
     ocr_session=None,
+    master_json=None,
 ):
     """Run one comparison mode on an existing RGB-D directory.
 
@@ -543,7 +544,8 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
     else:
         masks, sam_data = _reuse_prepared_shot(prepared, shot_dir)
     merged = current.merge_ocr_and_masks(
-        query=query, masks=masks, shot_dir=shot_dir, interactive=False, threshold=40
+        query=query, masks=masks, shot_dir=shot_dir, interactive=False, threshold=40,
+        master_json=master_json,
     )
     if not merged.get("results"):
         raise stable.TargetMaskSelectionError(
@@ -650,6 +652,7 @@ def run_capture_and_pca_sam3_refined_median_depth(
     *,
     mode=DEFAULT_MODE,
     shot_dir=None,
+    master_json=None,
 ):
     """Live-compatible public API. This function is not used by offline tests."""
     if shot_dir is None:
@@ -669,6 +672,7 @@ def run_capture_and_pca_sam3_refined_median_depth(
         mode=mode,
         intr=intr,
         depth_scale=depth_scale,
+        master_json=master_json,
     )
     return (
         float(result["roll_rad"]),

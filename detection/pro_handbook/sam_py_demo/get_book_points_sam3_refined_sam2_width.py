@@ -16,7 +16,10 @@ from .get_book_points_sam3_refined_median_depth import (
     prepare_offline_shot,
     run_capture_and_pca_offline_sam3_refined_median_depth,
 )
-from .modules.sam2_compatible_geometry import estimate_sam2_compatible_geometry
+from .modules.sam2_compatible_geometry import (
+    DEFAULT_MASK_PCA_WIDTH_MODE,
+    estimate_sam2_compatible_geometry,
+)
 
 
 VARIANT = "sam3_refined_sam2_width"
@@ -57,6 +60,8 @@ def run_capture_and_pca_offline_sam3_refined_sam2_width(
     depth_merge_tolerance_raw=30,
     prepared=None,
     ocr_session=None,
+    master_json=None,
+    mask_width_mode=DEFAULT_MASK_PCA_WIDTH_MODE,
 ):
     """Run current refine-only recognition, replacing only its returned width.
 
@@ -66,6 +71,9 @@ def run_capture_and_pca_offline_sam3_refined_sam2_width(
     ocr_session には ocr_worker_session.OcrWorkerSession を渡せる。使い捨て
     OCRサブプロセスの代わりに常駐workerでモデルを使い回す
     （prepared 経由で使い回すときは無関係）。
+
+    mask_width_mode は幅測定の集計方法（sam2_compatible_geometry.py の
+    MASK_PCA_WIDTH_MODES）。OCR軸ではなくマスクPCA軸を使う。
     """
     shot_dir = Path(shot_dir).expanduser().resolve()
     base = run_capture_and_pca_offline_sam3_refined_median_depth(
@@ -78,6 +86,7 @@ def run_capture_and_pca_offline_sam3_refined_sam2_width(
         depth_merge_tolerance_raw=depth_merge_tolerance_raw,
         prepared=prepared,
         ocr_session=ocr_session,
+        master_json=master_json,
     )
 
     mask_path = shot_dir / "selected_mask_refined.png"
@@ -95,6 +104,9 @@ def run_capture_and_pca_offline_sam3_refined_sam2_width(
     points = _read_ply_xyz(pca_path)
     camera = _load_json(shot_dir / "camera_params.json")
     refinement = _load_json(shot_dir / "mask_refinement_result.json")
+    # OCR geometry remains available for mask refinement and diagnostics, but
+    # final image-width measurement must use all pixels of the refined mask.
+    ocr_axis = refinement.get("axis_uv")
     current = {
         "roll_rad": float(base["roll_rad"]),
         "width_mm": float(base["pred_book_width_mm"]),
@@ -107,7 +119,10 @@ def run_capture_and_pca_offline_sam3_refined_sam2_width(
         depth,
         points,
         camera,
-        selected_axis=refinement.get("axis_uv"),
+        selected_axis=None,
+        use_mask_pca_axis=True,
+        diagnostic_ocr_axis=ocr_axis,
+        mask_width_mode=mask_width_mode,
         current_geometry=current,
         geometry_mode="sam2_width_only",
         debug_dir=shot_dir / "sam2_width_debug",
@@ -123,11 +138,22 @@ def run_capture_and_pca_offline_sam3_refined_sam2_width(
             "pred_book_width_mm": width_mm,
             "width_info": width_geometry["width"],
             "width_method": "sam2_compatible_width_only",
+            "mask_width_mode": mask_width_mode,
             "current_sam3_width_mm": float(base["pred_book_width_mm"]),
             "roll_rad": float(base["roll_rad"]),
             "point_3d": list(base["point_3d"]),
             "target_uv": list(base["target_uv"]),
             "width_input_mask": "selected_mask_refined.png",
+            "selected_width_axis_source": width_geometry["selected_width_axis_source"],
+            "mask_pca_axis_uv": width_geometry["mask_pca_axis_uv"],
+            "mask_pca_axis_angle_deg": width_geometry["mask_pca_axis_angle_deg"],
+            "mask_pca_eigenvalues": width_geometry["mask_pca_eigenvalues"],
+            "mask_pca_eigenvalue_ratio": width_geometry["mask_pca_eigenvalue_ratio"],
+            "mask_pca_pixel_count": width_geometry["mask_pca_pixel_count"],
+            "ocr_axis_uv": width_geometry["ocr_axis_uv"],
+            "ocr_axis_angle_deg": width_geometry["ocr_axis_angle_deg"],
+            "ocr_mask_axis_angle_diff_deg": width_geometry["ocr_mask_axis_angle_diff_deg"],
+            "pixel_width": width_geometry["pixel_width"],
             "invariance": {
                 "refined_mask_sha256_before_width": mask_sha,
                 "refined_mask_sha256_after_width": _sha256(mask_path),
@@ -155,6 +181,8 @@ def run_capture_and_pca_sam3_refined_sam2_width(
     sam_device="gpu",
     *,
     shot_dir=None,
+    master_json=None,
+    mask_width_mode=DEFAULT_MASK_PCA_WIDTH_MODE,
 ):
     """Live-compatible API; capture once, then run the offline width-only path."""
     if shot_dir is None:
@@ -173,6 +201,8 @@ def run_capture_and_pca_sam3_refined_sam2_width(
         sam_device=sam_device,
         intr=intr,
         depth_scale=depth_scale,
+        master_json=master_json,
+        mask_width_mode=mask_width_mode,
     )
     return (
         float(result["roll_rad"]),
