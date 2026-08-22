@@ -8,11 +8,11 @@
 
 2026-08-22: 本ファイルはoffline_pointcloud_debug_SAM3_catheter.py(カテーテル用に
 TEST_BASE_DIR/MASTER_JSON等を差し替えた版)から分離した書籍用オリジナル設定の復元版。
-【注意】captures/100test/(実際のcaptures/100testデータ)は、この「1枚に全品目」方式では
-なく「1品目につき専用5枚」という別方式のデータであることが判明している
-(offline_100test_SAM3.pyの2026-08-22修正コメント参照)。本ファイルの
-TEST_BASE_DIR(captures/5shot_book)は現時点でこのマシン上に存在しない。
-このスクリプトを実際に使うには、「1枚に全20品目が写った棚写真」を5枚新規に用意する必要がある。
+TEST_BASE_DIRはcaptures/100test/を指す。captures/100test/の各写真は「1品目につき専用5枚」
+という撮影意図(offline_100test_SAM3.py参照)ではあるものの、実際の写真自体は棚全体・
+全20品目が写っている(ユーザー確認済み)ため、本スクリプトが前提とする「1枚に全品目」
+という条件は満たしている。既定ではN_SHOTS=5枚(1〜5番)だけを使い全20品目でクエリするが、
+--shotsで使う写真番号を変更できる(例: --shots 1-100 なら全100枚×20品目=2000評価)。
 """
 
 from detection.pro_handbook.sam_py_demo.get_book_points_sam3_refined_sam2_width import (
@@ -41,12 +41,13 @@ from contextlib import redirect_stdout, redirect_stderr
 BASE_DIR = Path(__file__).resolve().parent
 
 # 元の入力データ（<N>/after_init_rgb.png ... の連番フォルダ）
-# 【要注意】このディレクトリは2026-08-22時点でこのマシン上に存在しない。
-# 「1枚に全20品目が写った棚写真」を5枚新規に用意してから使うこと。
-TEST_BASE_DIR = BASE_DIR / "captures" / "5shot_book"
+# captures/100test/を使う(各写真は棚全体・全20品目が写っているため、
+# 「1枚に全品目」という本スクリプトの前提を満たす)。
+TEST_BASE_DIR = BASE_DIR / "captures" / "100test"
 
-# offline実行結果の保存先
-OFFLINE_BASE_DIR = BASE_DIR / "captures" / "5shot_book_offline"
+# offline実行結果の保存先(offline_100test_SAM3.pyのcaptures/100test_offline/とは
+# 別物。評価方式(1枚に全品目クエリ)が違うため出力先も分ける)
+OFFLINE_BASE_DIR = BASE_DIR / "captures" / "100test_pointcloud_debug_offline"
 
 MASTER_JSON = BASE_DIR / "master_100test.json"
 
