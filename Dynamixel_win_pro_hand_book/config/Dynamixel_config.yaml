@@ -1,5 +1,5 @@
 id:
-  port: '/dev/ttyUSB0' # linux
+  port: '/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAAMOXS-if00-port0' # linux
   baudrate: 57600
   gripper: 1
   spacer_rot: 2

@@ -11757,7 +11757,10 @@ def merge_ocr_and_masks(
     カテーテル用マスタへ無条件フォールバックし、書籍クエリが全件「マスタに無い」扱いになる
     バグを修正)。
     """
-    results = match_text_to_mask_main(query, masks, shot_dir, threshold=threshold, master_json=master_json)
+    results = match_text_to_mask_main(
+        query, masks, shot_dir, threshold=threshold, master_json=master_json,
+        save_all_assignments=True,
+    )
 
     book_name = results[0]["name"] if results else None
 

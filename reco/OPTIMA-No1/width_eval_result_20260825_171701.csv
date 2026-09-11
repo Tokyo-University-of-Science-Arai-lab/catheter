@@ -1,0 +1,6 @@
+﻿shot,query,book_name_true,display_name,book_width_mm_true,book_width_mm_pred,abs_error_mm,retry_count,elapsed_sec,error
+1__OPTI0408CSS10,OPTI0408CSS10,OPTI0408CSS10,OPTIMA,17,,,0,,"RuntimeError: target point estimation failed: {'ok': False, 'target_m': None, 'num_candidates': 0}"
+1__OPTI0306CSS10,OPTI0306CSS10,OPTI0306CSS10,OPTIMA,20,,,0,,"RuntimeError: target point estimation failed: {'ok': False, 'target_m': None, 'num_candidates': 0}"
+1__OPTI0204CSS10,OPTI0204CSS10,OPTI0204CSS10,OPTIMA,20,,,0,,"RuntimeError: target point estimation failed: {'ok': False, 'target_m': None, 'num_candidates': 0}"
+1__OPTI0153CSS10,OPTI0153CSS10,OPTI0153CSS10,OPTIMA,20,,,0,,"RuntimeError: target point estimation failed: {'ok': False, 'target_m': None, 'num_candidates': 0}"
+1__OPTI0152CSS10,OPTI0152CSS10,OPTI0152CSS10,OPTIMA,20,,,0,,"RuntimeError: target point estimation failed: {'ok': False, 'target_m': None, 'num_candidates': 0}"

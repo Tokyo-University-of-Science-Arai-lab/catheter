@@ -1,0 +1,144 @@
+[
+  {
+  "book_name": "OPTI0408CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F250800231",
+  "expiration date": "2030-08-07",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+  "SPEC_1": "4 mm",
+  "SPEC_2": "8 cm"
+  },
+
+    {
+  "book_name": "OPTI0408CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F260200861",
+  "expiration date": "2030-08-07",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+  "SPEC_1": "4 mm",
+  "SPEC_2": "8 cm"
+  },
+
+  {
+  "book_name": "OPTI0306CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F230400435",
+  "expiration date": "2030-04-15",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+  "SPEC_1": "3 mm",
+  "SPEC_2": "6 cm"
+  },
+
+  {
+  "book_name": "OPTI0204CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F251100383",
+  "expiration date": "2030-11-11",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+  "SPEC_1": "2 mm",
+  "SPEC_2": "4 cm"
+  },
+
+  {
+  "book_name": "OPTI0153CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F24120061",
+  "expiration date": "2030-12-04",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+    "SPEC_1": "1.5 mm",
+    "SPEC_2": "3 cm"
+  },
+
+  {
+  "book_name": "OPTI0152CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F260200774",
+  "expiration date": "2031-02-17",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+    "SPEC_1": "1.5 mm",
+    "SPEC_2": "2 cm"
+  },
+
+    {
+  "book_name": "OPTI0152CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F250900278",
+  "expiration date": "2031-09-08",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+    "SPEC_1": "1.5 mm",
+    "SPEC_2": "2 cm"
+  },
+
+  {
+  "book_name": "OPTI0152CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F241200465",
+  "expiration date": "2029-12-13",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+    "SPEC_1": "1.5 mm",
+    "SPEC_2": "2 cm"
+  },
+
+  {
+  "book_name": "10CSW01010",
+  "display_name": "Wallaby Avenir Coil System",
+  "LOT": "WCS12609",
+  "expiration date": "2031-05-09",
+  "ISBN_number": "不明",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "15.2",
+  "SPEC_1": "1 mm",
+  "SPEC_2": "10 cm"
+  },
+  {
+  "book_name": "10CSW01515",
+  "display_name": "Wallaby Avenir Coil System",
+  "LOT": "WCS12612",
+  "expiration date": "2031-04-14",
+  "ISBN_number": "不明",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "15.2",
+  "SPEC_1": "1.5 mm",
+  "SPEC_2": "15 cm"
+  },
+
+  {
+  "book_name": "10CSW02020",
+  "display_name": "Wallaby Avenir Coil System",
+  "LOT": "WCS12434",
+  "expiration date": "2031-03-23",
+  "ISBN_number": "不明",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "15.2",
+  "SPEC_1": "2 mm",
+  "SPEC_2": "20 cm"
+  },
+
+  {
+  "book_name": "10CSW02020",
+  "display_name": "Wallaby Avenir Coil System",
+  "LOT": "WCS11772",
+  "expiration date": "2031-12-14",
+  "ISBN_number": "不明",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "15.2",
+  "SPEC_1": "2 mm",
+  "SPEC_2": "20 cm"
+  }
+]

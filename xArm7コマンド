@@ -42,6 +42,8 @@ source .pro_hand_book_fixed/bin/activate
 python -m Dynamixel_win_pro_hand_book.id_1_gripper_pos_check
 
 
+##撮影姿勢まで動かす
+
 cd ~/pro_book/pro_hand_book_python
 python3 -m xarm7.control.xarm_init_to_capture
 
@@ -106,6 +108,20 @@ cd /home/book/pro_book/pro_hand_book_python
 python3 -m Dynamixel_win_pro_hand_book.id_1_gripper_pos_check
 python -m Dynamixel_win_pro_hand_book.HandBook_Retrieval
 
+###アノテーション用の撮影（RealSense D435i のみ使用。xArm・ハンド・昇降は不要）
+cd ~/pro_book/pro_hand_book_python
+source .pro_hand_book_fixed/bin/activate
+python3 capture_anno.py
+# 引数なし。プレビュー窓で Enter=1枚撮影 / ESC・Ctrl+C=終了。中断まで何枚でも撮れる
+# 保存先: anno-catheter/<連番>/ （連番は既存フォルダの最大+1で自動。1回の実行につき1フォルダ）
+#   depth_shots/<n>/  after_init_rgb.png + after_init_depth.npy + camera_params.json
+#   images/<n>.png     RGBのみ（CVAT等のアノテーションツール用、命名は reco/*/images/ と同じ）
+# shot番号は毎回1から。撮影ごとに深度の有効画素%を表示（50%未満で [WARN]）
+# このフォルダを丸ごと reco/<新データセット名>/ に置けば width_mm_validation.py 等でそのまま使える
+
+###自動アノテーション（事前に、フォルダにdepth_shotsを入れる）
+python3 reco/scripts/auto_annotate.py --dataset OPTIMA-No1
+
 
 ##オフライン認識##
 # 本番と同じ簡易版パイプラインで評価（これが既定、基本の使い方）
@@ -114,16 +130,38 @@ python reco/scripts/width_mm_validation.py --dataset diagonal-40
 
 python reco/scripts/build_width_eval_report.py --suffix _20260822_1xxxxx
 
-# 従来の複雑なパイプラインと比較したい場合
-python reco/scripts/width_mm_validation.py --dataset stand-100 --pipeline legacy --label legacy_ab
+##新しいオフライン認識
+python3 reco/scripts/width_mm_validation.py --dataset <データセット名> [オプション]
+python3 reco/scripts/width_mm_validation.py --dataset ROOB-1 --master-json catheter-100/master_catheter_2.json
 
-オプション
---label <名前>	実行に分かりやすい名前を付ける（例:--label test1、結果フォルダ名に付与）
---only <shot名>	1件だけ試す（動作確認用）
---limit N	先頭N件だけ試す
---no-retry	誤差5mm以上でのリトライを無効化
---no-fragmentation-handling	マスク分裂対応を無効化（比較用）
---verbose	詳細ログ表示
+    --dataset (必須)   reco/<名前>/ のデータセット名(stand-100, diagonal-40, 任意の新規名)
+    --master-json      クエリ一覧のマスタJSON。省略時は reco/master_catheter_reco.json(20品目)
+    --only <画像名>    その画像フォルダ/shotだけ処理する(スモークテスト用)
+    --limit N          先頭N件だけ処理する
+    --sam-device       既定 "gpu"
+    --no-retry         推定幅誤差5mm以上でのリトライを無効化(A/B比較で単一要因だけ見たい場合用)
+    --no-report        完了後の自動Excelレポート生成(reco_result_<日時>/)を無効化
+    --work-suffix      【非推奨・後方互換用】接尾辞を直接指定。通常は省略して自動の日時のみにする
+    --verbose          失敗時にトレースバックを表示
+
+
+
+####サービス確認、起動
+#確認
+curl -s http://127.0.0.1:8765/health | python3 -m json.tool
+#起動（止めたいときはstart → stop）
+cd /home/catheter/pro_book/pro_hand_book_python/detection/pro_handbook/sam3_runtime/scripts
+bash start_service.sh
+
+
+
+###8/7くらいの環境で認識を回すコマンド
+cd /home/catheter/pro_book_worktree_f839a80/pro_hand_book_python
+source .pro_hand_book_fixed/bin/activate
+python3 reco/scripts/width_mm_validation_f839a80.py \
+    --dataset ROOB-2 \
+    --master-json catheter-100/master_catheter_3.json \
+    --tag old_pipeline_catheter_model
 
 
 #認識古いやつ
@@ -132,7 +170,32 @@ python recognition_accuracy_test.py
 
 
 
-##開口幅調整
+##開口幅調整[INFO] [1788253648.193427942] [xarm_init_to_capture]: Waypoint state reset to IDLE
+start sequence
+[INFO] [1788253648.193623786] [xarm_init_to_capture]: Waypoint state reset to IDLE
+[INFO] [1788253648.193731709] [book_retrieval_main]: Using shelf_id from config: 2-5-1-1
+[INFO] [1788253648.193969728] [xarm_init_to_capture]: Shelf → B=5, C=1, side=right, lift=0.0mm, tcp_offset=60.0mm
+Shelf side: right
+Lift height: 0.0
+Abort sequence due to exception
+Traceback (most recent call last):
+  File "/home/catheter/pro_book/pro_hand_book_python/Retrieval_integration.py", line 170, in main_sequence
+    HandMotors_retrieval = HandBook_retrieval.init_dynamixels()
+  File "/home/catheter/pro_book/pro_hand_book_python/Dynamixel_win_pro_hand_book/HandBook_Retrieval.py", line 39, in init_dynamixels
+    dxl.disable_torque(GRIPPER_ID)
+  File "/home/catheter/pro_book/pro_hand_book_python/Dynamixel_win_pro_hand_book/dynamixel_cross_platform.py", line 104, in disable_torque
+    self._write1(dxl_id, self.__ADDR_TORQUE_ENABLE, self.__TORQUE_DISABLE, "disable_torque")
+  File "/home/catheter/pro_book/pro_hand_book_python/Dynamixel_win_pro_hand_book/dynamixel_cross_platform.py", line 84, in _write1
+    self._check_write(comm, err, context=context)
+  File "/home/catheter/pro_book/pro_hand_book_python/Dynamixel_win_pro_hand_book/dynamixel_cross_platform.py", line 60, in _check_write
+    raise RuntimeError(f"{context} COMM ERROR: {msg}")
+RuntimeError: disable_torque COMM ERROR: [TxRxResult] There is no status packet!
+[EMG] HandMotors_retrieval is None. Skip hand close.
+Ctrl+C / Emergency detected → close hand then FORCE KILL
+[EMG] HandMotors_retrieval is None. Skip hand close.
+[EMERGENCY STOP]
+[set_state], xArm is not ready to move
+(.pro_hand_book_fixed) catheter@cathet
 python calibrate_gripper.py
 
 python -m Dynamixel_win_pro_hand_book.HandBook_Retrieval

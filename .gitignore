@@ -81,6 +81,21 @@ reco/*/width_eval_report/
 reco/*/reco_result_*/
 reco/*/outputs/
 
+# capture_anno.py output: same reasoning as reco/ above (RGB+depthの生撮影データが
+# 撮影のたびに増え続けるため、コード側の変更だけをpushする。2026-09-11)
+anno-catheter/*/depth_shots/
+anno-catheter/*/images/
+
+# 2026-09-11 ユーザー指示: 画像ファイルは基本的にプッシュしない。
+# reco/・anno-catheter/以外にも撮影/アノテーション由来の画像(overlays等)が
+# 個別のgitignoreパターンをすり抜けて残っていたため、拡張子ベースの全体ルールにした。
+# 既にgit管理下にある画像(Dynamixel SDK同梱ドキュメントのアイコン等)には影響しない。
+# 例外的に特定の画像を追跡したい場合は `git add -f <path>` するか、
+# 個別に `!path/to/image.png` を下に追記すること。
+*.png
+*.jpg
+*.jpeg
+
 # Local installers and archives
 *.deb
 *.run

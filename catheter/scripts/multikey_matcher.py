@@ -36,11 +36,22 @@
 
 ■ 保存されるデバッグ出力（shot_dir配下）
   multikey_match_debug.json : キー別スコア・割当・採用理由
+  ocr_overlay_perkey_top1.png : 選択マスク(query=target_jの割当先)に帰属する
+      OCR検出のうち、5キー(ref/display_name/date/spec_1/spec_2)それぞれで
+      最もスコアが高かった1件だけを切り出した可視化（値が空のキーは対象外）
+  ocr_overlay_all_assignments.png : 全マスクの矩形とHungarian割当(1回の認識で
+      マスタ全品目×全マスクを一括で最適割当している)の結果を1枚にまとめて
+      可視化したもの(queryは赤枠太線、他品目は色分け、割当の無いマスクは
+      灰色枠)。「query以外の品目も正しく別マスクへ選べているか」を一望で
+      目視確認するための画像(2026-08-26試験導入、match_text_to_mask_main(...,
+      save_all_assignments=True)のときのみ生成。既定Falseで、数値情報のみ
+      multikey_match_debug.jsonのall_assignmentsに常に出力される)
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import unicodedata
 from pathlib import Path
@@ -67,8 +78,40 @@ DEFAULT_MASTER_JSON = (
 # 低信頼のOCR断片はゴミ文字になりやすいので落とす
 MIN_REC_SCORE = 0.5
 
-# 「確信あり」の判定。margin = 最高スコアと2位の差。
-# margin が小さいものは「どのマスクとも同程度に似ている」＝信用できない。
+# 従来手法（比較実験用）: 環境変数 MULTIKEY_LEGACY=1 で有効になる。
+# query(book_name = REF) 1本だけで採点し、領域ごとに独立して最尤候補を選ぶ
+# （多段クエリもハンガリー法も使わない）。2026-08-30、ポスターの従来手法/
+# 提案手法の比較のために追加。呼び出し側で use_multikey / use_hungarian を
+# 明示指定した場合はそちらが優先される。
+LEGACY_MODE = os.environ.get("MULTIKEY_LEGACY", "") == "1"
+
+# 根拠ゼロの割当を棄却する（比較実験用）: 環境変数 MULTIKEY_DROP_ZERO=1 で有効。
+# ハンガリー法は「マスタの全品目を必ずどこかのマスクへ割り当てる」ため、棚に写って
+# いない品目まで空いたマスクへ押し込まれる。その過程で、実在する品目の正解マスクが
+# 横取りされる事例が確認された（2026-09-01、書籍100test の test_index=82:
+# 目標書籍が mask_17 で88.9点だったにもかかわらず、他に行き場のない「演習機械振動学」
+# (50.0点)へ mask_17 を譲り、目標は次点の mask_11(80.0点)に回されて誤選択となった）。
+# 有効時は「全キーの生スコアが0の組み合わせ」を割当候補から外し、根拠が無い品目を
+# 押し込まないようにする。既定は無効で、無指定なら挙動は一切変わらない。
+DROP_ZERO_ASSIGN = os.environ.get("MULTIKEY_DROP_ZERO", "") == "1"
+
+# 「確信あり」の判定。
+# 2026-08-25まではscore>=70 and margin>=20(margin=最高スコアと2位の差)だけで
+# 判定していたが、REFコード同士が非常に似通っている(INC-11814-125 / -146等)ため、
+# marginは正しいマッチでも小さくなりがちで、確信度の指標として頼りにならないと
+# ユーザーから指摘を受けた。そこで2段構成に変更する:
+#   1) REFスコアが100(完全一致)なら、他キーの結果に関わらず確信ありとする。
+#      同一タイトルの品目が大量にあってもREFは品目ごとに一意なので、
+#      完全一致は最も強い証拠になる。
+#   2) REFスコアが低い場合は、display_name/date/spec_1/spec_2という4本の
+#      補助キーのうち何本が高スコアかで総合判断する(marginは使わない)。
+#      display_nameだけでは同一タイトル品目を区別できないため、
+#      複数の補助キーが揃って高スコアであることを求める。
+REF_EXACT_SCORE = 100.0
+SUPPORT_KEY_SCORE = 70.0     # 補助キー1本が「効いている」とみなす閾値
+SUPPORT_KEY_MIN_COUNT = 2    # 確信ありとみなすために必要な補助キーの本数
+
+# 旧方式(score/marginベース)の名残。デバッグ出力の参考値としてのみ使う。
 CONFIDENT_SCORE = 70.0
 CONFIDENT_MARGIN = 20.0
 
@@ -79,20 +122,23 @@ CONFIDENT_MARGIN = 20.0
 # バグ(HANDOFF_20260731.md、1文字断片が満点になっていた件)と同根の問題。
 MIN_KEY_TEXT_LEN_FOR_MATCH = 4
 
+# キースコアの合成方式。
+# 2026-08-28、ユーザー要望: OPTI0152CSS10/OPTI0153CSS10のように、5キー中
+# display_name/spec_1が完全に同一で、spec_1のような共有キーが複数マスクで
+# 同時に満点(100)になると、旧既定のcentered_max(中央値補正+MAX)ではその
+# 同点キーだけで決着してしまい、本来決め手になるべき他キー(spec_2等)の差が
+# 完全に無視される問題が判明した(実データで検証: ROOB-3のOPTIMA系45件中
+# 6件が同点による誤選択)。raw_sumは中央値補正をせず5キーの生スコアを単純
+# 合計する方式で、ROOB-1(近縁品目中心・96件、目視レビュー済み)で95.8%正解
+# (centered_max由来の同点誤選択が解消)を確認した。
+# 2026-09-01、ユーザー承認によりraw_sumを本番の既定値に変更(ポスターの
+# 提案手法の数値もraw_sum実行分を採用)。centered_maxはstand-100のような
+# 多品目混在データセットでの影響が未検証(2026-08-28時点、実データ50/127件で
+# 選択結果が変化、大半が目視未レビュー)なため、比較用に環境変数
+# MULTIKEY_SCORE_COMBINE=centered_max で明示的に戻せるようにしてある。
+SCORE_COMBINE_METHOD = os.environ.get("MULTIKEY_SCORE_COMBINE", "raw_sum").strip().lower()
+
 FORCED_ANGLE = 90
-
-# 色補助キー(2026-08-21試験導入)。無地・OCR手がかりの薄い品目(オレンジ箱等)向けの
-# 補助シグナル。マスタ側にcolor_rgbが無い品目は0点になり、他の3キー(ref/display_name/
-# 日付)だけで採点した場合と同じ挙動になる(後方互換、マスタ未対応でも壊れない)。
-COLOR_MAX_DIST = 150.0
-
-# 色キーの中央値センタリング後の値に掛ける減衰係数。多くの品目は白〜グレー系の
-# 似た色なので、素の色スコアだけでも僅かな差でwinning_key/marginの計算を乗っ取り、
-# 本来ref/display_nameで確信度が高いはずのマスクの信頼度表示を壊す実例が確認された
-# (2026-08-21、MC1715000等で確認: 同じマスクが選ばれ続けるのにcolorキーが僅差で
-# argmaxを奪いmargin=-3.1等になり見かけ上confident=Falseになっていた)。
-# 減衰させることで、色がオレンジ箱のように明確に違う場合だけ実際に勝てるようにする。
-COLOR_KEY_WEIGHT = 0.35
 
 
 # ===== 文字列正規化 =====
@@ -108,6 +154,10 @@ def _normalize(s: str) -> str:
 
 def _digits_only(s: str) -> str:
     return re.sub(r"\D", "", s or "")
+
+
+def _safe_name(s: str) -> str:
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in (s or ""))
 
 
 # 選択マスクのOCRテキストが「識別の根拠として意味を持ちそうか」の簡易判定。
@@ -135,7 +185,16 @@ def _looks_like_plausible_identifier(text: str) -> bool:
     return has_long_digit_run or has_alnum_mix or looks_like_date
 
 
-def _key_score(key: str, combined: str, *, is_date: bool = False) -> float:
+def _extract_value_unit_pairs(s: str) -> list[tuple[float, str]]:
+    """"1.5 mm"、"2cm"のような(数値, 単位)のペアを文字列から全て抜き出す。
+    単位が読めない/無い場合は unit="" になる。"""
+    pairs = []
+    for m in re.finditer(r"(\d+(?:\.\d+)?)\s*([A-Za-z]*)", s):
+        pairs.append((float(m.group(1)), m.group(2).lower()))
+    return pairs
+
+
+def _key_score(key: str, combined: str, *, is_date: bool = False, is_numeric: bool = False) -> float:
     """
     1キーに対するスコア（0〜100）。
 
@@ -150,11 +209,44 @@ def _key_score(key: str, combined: str, *, is_date: bool = False) -> float:
         k = _digits_only(key)
         if len(k) < 6:  # '2029-02' のような不完全な日付はキーにしない
             return 0.0
-        cands = [_digits_only(t) for t in re.findall(r"\d[\d\-/.]{5,}", combined)]
+        # 2026-09-11: 「2028年 10月」のような漢字区切り(空白混在)の日付は、
+        # 年/月/日で数字の連続が途切れてしまい、そのままではこの下の正規表現が
+        # 候補として拾えなかった(常に0点になっていた)。日付候補抽出専用の
+        # 一時変換として、年/月/日とその前後の空白だけをまとめてハイフンに
+        # 置換してから抽出する(combined自体やref/display_name/spec側のロジックには
+        # 影響しない)。空白を無差別に消すと隣接する別トークン(REF末尾の数字等)が
+        # 日付候補に混入してしまうため、年/月/日に隣接する空白だけを対象にする。
+        combined_for_date = re.sub(r"\s*[年月日]\s*", "-", combined)
+        cands = [_digits_only(t) for t in re.findall(r"\d[\d\-/.]{5,}", combined_for_date)]
         cands = [c for c in cands if len(c) >= 6]
         if not cands:
             return 0.0
         return float(max(fuzz.ratio(k, c) for c in cands))
+
+    if is_numeric:
+        # 2026-08-25試験導入: SPEC_1/SPEC_2("1.5 mm"、"2 cm"等)は数値そのものに
+        # 意味があり、fuzz.partial_ratioでは"2cm"と"3cm"のような1文字違いの短い
+        # 文字列を区別できない(実データで確認、OPTIMA系列で誤認識の主因になった)。
+        # 数値部分を抜き出して一致判定する。単位まで一致すれば満点、片側の単位が
+        # 読めていない場合は減点、単位が明確に食い違う場合は不一致とみなす。
+        key_pairs = _extract_value_unit_pairs(key)
+        if not key_pairs:
+            return 0.0
+        combined_pairs = _extract_value_unit_pairs(combined)
+        if not combined_pairs:
+            return 0.0
+        best = 0.0
+        for kv, ku in key_pairs:
+            for cv, cu in combined_pairs:
+                if kv != cv:
+                    continue
+                if ku and cu:
+                    if ku == cu:
+                        best = max(best, 100.0)
+                    # 単位が両方読めていて食い違う場合は別の数値とみなし加点しない
+                else:
+                    best = max(best, 80.0)  # 片側の単位が読めていない場合はやや減点
+        return best
 
     key_norm = _normalize(key)
     combined_norm = _normalize(combined)
@@ -163,24 +255,6 @@ def _key_score(key: str, combined: str, *, is_date: bool = False) -> float:
     if min(len(key_norm), len(combined_norm)) < MIN_KEY_TEXT_LEN_FOR_MATCH:
         return 0.0
     return float(fuzz.partial_ratio(key_norm, combined_norm))
-
-
-def _color_score(mask_rgb, master_rgb, *, max_dist: float = COLOR_MAX_DIST) -> float:
-    """マスクの平均色とマスタの参照色(color_rgb)のユークリッド距離を0〜100に変換する。
-
-    他の3キー(ref/display_name/date)と同じ0〜100スケールに合わせ、後段の
-    列ごと中央値センタリングと同じ仕組みに乗せる。ほとんどの品目は白系パッケージで
-    互いに似た色になるため中央値センタリング後はほぼ0になり、オレンジ箱のように
-    明確に色が違う品目だけが浮き上がる設計(色が万能の識別キーになるわけではない)。
-    """
-    if mask_rgb is None or not master_rgb:
-        return 0.0
-    a = np.asarray(mask_rgb, dtype=np.float64)
-    b = np.asarray(master_rgb, dtype=np.float64)
-    if a.shape != (3,) or b.shape != (3,):
-        return 0.0
-    dist = float(np.linalg.norm(a - b))
-    return max(0.0, 100.0 * (1.0 - dist / max_dist))
 
 
 # ===== マスク・OCRの前処理 =====
@@ -205,14 +279,6 @@ def _mask_bbox(mask_bin: np.ndarray) -> dict[str, float] | None:
         "x1": float(xs.min()), "y1": float(ys.min()),
         "x2": float(xs.max()), "y2": float(ys.max()),
     }
-
-
-def _mask_mean_rgb(mask_bin: np.ndarray, rgb_img: np.ndarray) -> list[float] | None:
-    """マスク内画素の平均色(R,G,B)。rgb_imgはcv2.imread直後のBGR画像を想定。"""
-    if mask_bin.sum() < 1:
-        return None
-    mean_bgr = rgb_img[mask_bin > 0].mean(axis=0)
-    return [round(float(mean_bgr[2]), 1), round(float(mean_bgr[1]), 1), round(float(mean_bgr[0]), 1)]
 
 
 def _poly_mask_overlap_ratio(poly_pts: np.ndarray, mask_bin: np.ndarray, h: int, w: int) -> float:
@@ -331,12 +397,23 @@ def _load_master(master_json: Path) -> list[dict]:
     return data
 
 
-def _keys_of(entry: dict) -> list[tuple[str, str, bool]]:
-    """(キー種別, 文字列, 日付か) の一覧。"""
+def _keys_of(entry: dict) -> list[tuple[str, str, bool, bool]]:
+    """(キー種別, 文字列, 日付か, 数値専用比較か) の一覧。
+
+    spec_1/spec_2(2026-08-25試験導入、2026-08-25に数値専用比較へ変更): 箱に印字された
+    数値+単位のスペック値(例 "10 mm"、"150 cm")。当初はREF/display_nameと同じ
+    「combined全体へのあいまい一致(fuzz.partial_ratio)」に乗せていたが、"2cm"と"3cm"の
+    ような1文字違いの短い文字列を区別できず、似た品目同士(OPTIMA系列等)で誤認識の
+    主因になったため、数値部分を抜き出して比較する専用ロジック(_key_scoreのis_numeric)
+    に切り替えた。スペックが1つしかない品目はspec_2が空文字になり、_key_scoreが0点を
+    返すだけで他キーの邪魔をしない(dateキーと同じ後方互換の考え方)。
+    """
     return [
-        ("ref", entry.get("book_name", "") or "", False),
-        ("display_name", entry.get("display_name", "") or "", False),
-        ("date", entry.get("expiration date", "") or "", True),
+        ("ref", entry.get("book_name", "") or "", False, False),
+        ("display_name", entry.get("display_name", "") or "", False, False),
+        ("date", entry.get("expiration date", "") or "", True, False),
+        ("spec_1", entry.get("SPEC_1", "") or "", False, True),
+        ("spec_2", entry.get("SPEC_2", "") or "", False, True),
     ]
 
 
@@ -359,6 +436,203 @@ def _greedy_assign(S: np.ndarray) -> dict[int, int]:
     return out
 
 
+# ===== 可視化 =====
+
+def _save_assignment_overview(
+    shot_dir: Path,
+    rgb_path: Path,
+    boxes: list[dict | None],
+    mask_to_item: dict[int, dict],
+    out_filename: str = "ocr_overlay_all_assignments.png",
+) -> None:
+    """全マスク x 全品目の割当結果を、1枚の画像にまとめて可視化する
+    (2026-08-26試験導入)。個別品目ごとの画像(ocr_overlay_assign_*.png)だと
+    枚数が多く全体像が見えないとの要望に対応し、1枚で「どのマスクがどの品目に
+    紐付いたか」を一望できるようにした。
+
+    ocr_overlay_perkey_top1.pngと同じく、画像はOCRの処理向き(rotate90CW、
+    箱の背表紙文字が横書きで読める向き)に回転して表示し、右側に余白パネルを
+    作ってそこへ品目名の一覧を載せる(画像に直接ラベルを重ねると、隣接する
+    棚の箱同士でラベルが重なって読めなくなるため)。
+
+    mask_to_item: {mask_index(0始まり): {"book_name", "is_query", "score"}}
+    割当が無い(mask_to_item に無い)マスクは灰色の枠のみ描画する。
+    """
+    try:
+        img = cv2.imread(str(rgb_path))
+        if img is None:
+            return
+        h, w = img.shape[:2]
+        rotated = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+
+        # (0,0,255)の赤はQUERY専用色として予約するため、通常品目のパレットには含めない。
+        palette = [
+            (255, 60, 0), (0, 160, 0), (200, 0, 200), (0, 160, 200),
+            (0, 128, 255), (128, 0, 255), (0, 200, 120), (255, 0, 120), (120, 120, 0),
+            (0, 100, 200),
+        ]
+
+        def to_rotated(x: float, y: float) -> tuple[int, int]:
+            # _unrotate_poly(angle=90)の逆変換(元画像座標->OCR処理向き座標)。
+            return int((h - 1) - y), int(x)
+
+        rows = []  # (i, item, rx1, ry1, rx2, ry2) 回転後の軸並行bboxを描画順に集める
+        for i, box in enumerate(boxes):
+            if box is None:
+                continue
+            corners = [
+                to_rotated(box["x1"], box["y1"]), to_rotated(box["x2"], box["y1"]),
+                to_rotated(box["x1"], box["y2"]), to_rotated(box["x2"], box["y2"]),
+            ]
+            xs = [c[0] for c in corners]
+            ys = [c[1] for c in corners]
+            rx1, ry1, rx2, ry2 = min(xs), min(ys), max(xs), max(ys)
+            item = mask_to_item.get(i)
+            if item is None:
+                cv2.rectangle(rotated, (rx1, ry1), (rx2, ry2), (120, 120, 120), 1)
+                continue
+            color = (0, 0, 255) if item["is_query"] else palette[i % len(palette)]
+            thickness = 4 if item["is_query"] else 2
+            cv2.rectangle(rotated, (rx1, ry1), (rx2, ry2), color, thickness)
+            # マスク番号だけは画像上にも小さく振っておく(余白側の一覧と対応付けるため)。
+            cv2.putText(rotated, str(i + 1), (rx1 + 4, ry1 + 20), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, color, 2, cv2.LINE_AA)
+            rows.append((i, item, rx1, ry1, rx2, ry2))
+
+        # 余白パネル(右側)に品目一覧を書く。画像上の並び順(x座標=元画像の上下方向)に揃える。
+        rows.sort(key=lambda t: t[2])
+        panel_w = 480
+        line_h = 26
+        panel_h = max(rotated.shape[0], line_h * (len(rows) + 2) + 20)
+        panel = np.zeros((panel_h, panel_w, 3), dtype=np.uint8)
+        cv2.putText(panel, "mask -> assigned item", (14, 26), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7, (0, 255, 255), 2, cv2.LINE_AA)
+        y0 = 60
+        for i, item, *_ in rows:
+            color = (0, 0, 255) if item["is_query"] else palette[i % len(palette)]
+            cv2.circle(panel, (22, y0 - 6), 10, color, -1)
+            cv2.putText(panel, str(i + 1), (17, y0 - 2), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            score_txt = "" if item["score"] is None else f"  score={item['score']:.1f}"
+            line = f"mask_{i + 1}: {item['book_name']}{score_txt}"
+            if item["is_query"]:
+                line += "  [QUERY]"
+            cv2.putText(panel, line, (42, y0), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55, (255, 255, 255), 1, cv2.LINE_AA)
+            y0 += line_h
+
+        if rotated.shape[0] < panel_h:
+            pad = np.zeros((panel_h - rotated.shape[0], rotated.shape[1], 3), dtype=np.uint8)
+            rotated = np.vstack([rotated, pad])
+        out = np.hstack([rotated, panel])
+
+        shot_dir.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(shot_dir / out_filename), out)
+    except Exception as e:
+        print(f"[multikey] 割当一覧画像の保存に失敗（処理は継続）: {e}")
+
+
+def _save_perkey_overlay(
+    shot_dir: Path,
+    rgb_path: Path,
+    ocr_json_path: Path,
+    ocr_debug: list[dict],
+    sel_mask_name: str,
+    keys_of_target: list[tuple[str, str, bool]],
+    out_filename: str = "ocr_overlay_perkey_top1.png",
+    panel_label: str = "selected(top1)",
+) -> None:
+    """指定マスク(sel_mask_name)に帰属するOCR検出のうち、キーごとに最もスコアが高かった
+    1件だけを切り出して可視化する（multikey_match_debug.jsonの数値だけでは
+    「勝った検出」が視覚的に分かりにくいため）。失敗しても認識処理は継続する。
+
+    out_filenameを変えることで、採用マスク(top1)だけでなく次点マスク(top2)にも
+    流用できる(2026-08-26試験導入: 全体最適割当(ハンガリー法)が正しく機能しているか
+    ―採用されなかったマスクのOCRが本当に別品目のものかを目視で確認したいとの要望)。
+    """
+    try:
+        with open(ocr_json_path, "r", encoding="utf-8") as f:
+            ocr_data = json.load(f)
+        polys = ocr_data.get("dt_polys", [])
+
+        img = cv2.imread(str(rgb_path))
+        if img is None:
+            return
+        h, w = img.shape[:2]
+
+        matched = [a for a in ocr_debug if a["matched"] == sel_mask_name]
+        if not matched:
+            return
+
+        palette = [(0, 0, 255), (255, 60, 0), (0, 160, 0), (200, 0, 200), (0, 160, 200)]
+        winners: list[tuple[str, float, dict]] = []
+        for kname, ktext, is_date, is_numeric in keys_of_target:
+            if not ktext:
+                continue
+            scored = sorted(
+                ((_key_score(ktext, a["text"], is_date=is_date, is_numeric=is_numeric), a) for a in matched),
+                key=lambda t: -t[0],
+            )
+            score, a = scored[0]
+            winners.append((kname, score, a))
+        if not winners:
+            return
+
+        boxes_px: dict[str, np.ndarray] = {}
+        for kname, _score, a in winners:
+            idx = a["ocr_index"]
+            if idx - 1 >= len(polys):
+                continue
+            boxes_px[kname] = _unrotate_poly(polys[idx - 1], FORCED_ANGLE, w=w, h=h)
+        if not boxes_px:
+            return
+
+        all_pts = np.concatenate(list(boxes_px.values()), axis=0)
+        x1, y1 = all_pts[:, 0].min(), all_pts[:, 1].min()
+        x2, y2 = all_pts[:, 0].max(), all_pts[:, 1].max()
+        margin = 130
+        cx1, cy1 = max(0, int(x1 - margin)), max(0, int(y1 - margin))
+        cx2, cy2 = min(w, int(x2 + margin)), min(h, int(y2 + margin))
+
+        crop = img[cy1:cy2, cx1:cx2].copy()
+        if crop.size == 0:
+            return
+        scale = 3
+        crop = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+        for i, (kname, _score, _a) in enumerate(winners, start=1):
+            if kname not in boxes_px:
+                continue
+            color = palette[(i - 1) % len(palette)]
+            pp = ((boxes_px[kname] - [cx1, cy1]) * scale).astype(np.int32)
+            cv2.polylines(crop, [pp], isClosed=True, color=color, thickness=3)
+            cx, cy = int(pp[:, 0].mean()), int(pp[:, 1].min())
+            cv2.circle(crop, (cx, cy - 18), 16, color, -1)
+            cv2.putText(crop, str(i), (cx - 8, cy - 12), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7, (255, 255, 255), 2, cv2.LINE_AA)
+
+        legend_h = 34 * (len(winners) + 1) + 20
+        panel = np.zeros((legend_h, crop.shape[1], 3), dtype=np.uint8)
+        cv2.putText(panel, f"mask={sel_mask_name} [{panel_label}]  (per-key top-1 OCR match)", (14, 26),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
+        y0 = 60
+        for i, (kname, score, a) in enumerate(winners, start=1):
+            color = palette[(i - 1) % len(palette)]
+            cv2.circle(panel, (24, y0 - 7), 14, color, -1)
+            cv2.putText(panel, str(i), (18, y0 - 2), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (255, 255, 255), 2, cv2.LINE_AA)
+            line = f"{kname}: \"{a['text']}\"  score={score:.1f}"
+            cv2.putText(panel, line, (52, y0), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.65, (255, 255, 255), 2, cv2.LINE_AA)
+            y0 += 34
+
+        out = np.vstack([crop, panel])
+        shot_dir.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(shot_dir / out_filename), out)
+    except Exception as e:
+        print(f"[multikey] per-keyオーバーレイの保存に失敗（処理は継続）: {e}")
+
+
 # ===== 本番互換の入口 =====
 
 def match_text_to_mask_main(
@@ -368,8 +642,9 @@ def match_text_to_mask_main(
     threshold: int = 40,
     *,
     master_json: str | Path | None = None,
-    use_hungarian: bool = True,
-    use_multikey: bool = True,
+    use_hungarian: bool | None = None,
+    use_multikey: bool | None = None,
+    save_all_assignments: bool = False,
 ) -> list[dict[str, Any]]:
     """
     本番 only_one_tilted.match_text_to_mask_main と同じ入出力。
@@ -377,22 +652,30 @@ def match_text_to_mask_main(
     query はマスタの book_name（REF）を想定する。
     マスタに query が無い場合は、多段queryが使えないため
     query 1本のみで採点する（現行と同じ挙動）。
+
+    save_all_assignments: Trueにすると、全マスクの矩形とHungarian割当の結果を
+    1枚にまとめた画像(ocr_overlay_all_assignments.png)を書き出す
+    (2026-08-26試験導入)。Hungarian割当は実際には1回の認識でマスタ全品目×
+    全マスクの最適割当を一括で解いており、queryの品目だけでなく他の品目にも
+    それぞれマスクが割り当たっている。「query以外の品目も正しく別マスクへ
+    選べているか」を一望で目視確認したいとの要望に対応。既定はFalse
+    (数値情報はmultikey_match_debug.jsonのall_assignmentsに常に出力するので、
+    画像無しでも確認可能)。
     """
     shot_dir = Path(shot_dir)
     ocr_json_path = shot_dir / "ocr_result.json"
     rgb_path = shot_dir / "after_init_rgb.png"
 
     combined, boxes, ocr_debug = _collect_mask_texts(ocr_json_path, masks, rgb_path)
-    n_mask = len(masks)
+    # 明示指定が無ければ、環境変数 MULTIKEY_LEGACY による既定を使う
+    if use_multikey is None:
+        use_multikey = not LEGACY_MODE
+    if use_hungarian is None:
+        use_hungarian = not LEGACY_MODE
+    if LEGACY_MODE:
+        print("[multikey] 従来手法モード: query(REF)1本のみ・独立argmax")
 
-    # 色補助キー用: 各マスクの平均色を取っておく(2026-08-21試験導入)。
-    rgb_img_for_color = cv2.imread(str(rgb_path))
-    mask_mean_rgb: list[list[float] | None] = [None] * n_mask
-    if rgb_img_for_color is not None:
-        h_c, w_c = rgb_img_for_color.shape[:2]
-        for i, m in enumerate(masks):
-            mb = _mask_to_binary(m, h_c, w_c)
-            mask_mean_rgb[i] = _mask_mean_rgb(mb, rgb_img_for_color)
+    n_mask = len(masks)
 
     master_path = Path(master_json) if master_json else DEFAULT_MASTER_JSON
     if not use_multikey:
@@ -426,23 +709,34 @@ def match_text_to_mask_main(
     # そこで各キーの列から中央値を引いた「その品目らしさの突出度」で比較する。
     # 期限のように全マスクへ一様に高い値を出すキーは、中央値を引くとほぼ0になり、
     # 本当に効いているキーだけが残る。
-    n_keys = 4  # ref, display_name, date, color(2026-08-21試験導入)
+    n_keys = 5  # ref, display_name, date, spec_1, spec_2(2026-08-25)
     per_key = np.zeros((n_mask, n_master, n_keys), dtype=np.float64)
     for i in range(n_mask):
         c = combined[i]
         for j, m in enumerate(master):
-            for k, (_, key, is_date) in enumerate(_keys_of(m)):
-                per_key[i, j, k] = _key_score(key, c, is_date=is_date)
-            per_key[i, j, 3] = _color_score(mask_mean_rgb[i], m.get("color_rgb"))
+            for k, (_, key, is_date, is_numeric) in enumerate(_keys_of(m)):
+                per_key[i, j, k] = _key_score(key, c, is_date=is_date, is_numeric=is_numeric)
 
     centered = np.zeros_like(per_key)
     for j in range(n_master):
         for k in range(n_keys):
             col = per_key[:, j, k]
             centered[:, j, k] = col - (np.median(col) if col.size else 0.0)
-    centered[:, :, 3] *= COLOR_KEY_WEIGHT  # color キーの影響を減衰(理由は定数定義部を参照)
 
-    S = centered.max(axis=2)
+    # win_key/margin/confident等の報告用にcenteredは常に計算しておく(SCORE_COMBINE_METHODに
+    # 依らず、採用マスクに対する「どのキーが効いたか」の説明には引き続き使う)。
+    if SCORE_COMBINE_METHOD == "raw_sum":
+        S = per_key.sum(axis=2)
+    else:
+        S = centered.max(axis=2)
+
+    # 根拠ゼロ（全キーの生スコアが0）の組み合わせを割当候補から外す。
+    # 大きな負値を置くことで、ハンガリー法が他に選択肢を持つ限り選ばなくなる。
+    if DROP_ZERO_ASSIGN and n_mask and n_master:
+        no_evidence = per_key.max(axis=2) <= 0.0
+        if no_evidence.any():
+            S = np.where(no_evidence, -1.0e6, S)
+            print(f"[multikey] 根拠ゼロの組み合わせ {int(no_evidence.sum())} 件を割当候補から除外")
 
     # ===== 割当 =====
     if use_hungarian and n_mask > 0 and n_master > 0:
@@ -460,27 +754,59 @@ def match_text_to_mask_main(
     if sel_i is None and n_mask:
         sel_i = int(S[:, target_j].argmax())
 
+    # 全体最適割当(ハンガリー法)の効果を検証するため、他品目との競合を無視して
+    # このqueryだけで見た場合にどのマスクが最高スコアだったか(independent)も
+    # 常に記録しておく(2026-08-28試験導入)。independent != sel_iの場合、
+    # 一対一対応によって選択が変わったことを意味する。実際にそれで正解に
+    # なったか(目視確認Tか)は、multikey_match_debug.json単体では分からず
+    # 別途レビュー結果と突き合わせる必要がある。
+    independent_i = int(S[:, target_j].argmax()) if n_mask else None
+    hungarian_changed_selection = (
+        independent_i is not None and sel_i is not None and independent_i != sel_i
+    )
+
     # ===== 信頼度 =====
     # 報告するスコア/marginは「実際に効いたキー」の生スコアで出す。
     # 中央値を引いた値は比較用の内部量で、そのまま出すと意味が読み取れないため。
-    key_names = ["ref", "display_name", "date", "color"]
+    key_names = ["ref", "display_name", "date", "spec_1", "spec_2"]
     col = S[:, target_j]
     if sel_i is not None:
         win_k = int(np.argmax(centered[sel_i, target_j]))
         raw_col = per_key[:, target_j, win_k]
-        srt = np.sort(raw_col)[::-1]
-        top = float(srt[0])
-        second = float(srt[1]) if srt.size > 1 else 0.0
-        # 採用マスクが、そのキーで実際に最上位かどうかも見る
+        # 採用マスクが、そのキーで実際に最上位かどうかも見る(参考値。confidentの判定には使わない)
         top = float(raw_col[sel_i])
         others = np.delete(raw_col, sel_i)
         margin = top - (float(others.max()) if others.size else 0.0)
         win_key = key_names[win_k]
+
+        ref_score = float(per_key[sel_i, target_j, 0])
+        support_scores = {
+            "display_name": float(per_key[sel_i, target_j, 1]),
+            "date": float(per_key[sel_i, target_j, 2]),
+            "spec_1": float(per_key[sel_i, target_j, 3]),
+            "spec_2": float(per_key[sel_i, target_j, 4]),
+        }
+        support_count = sum(1 for v in support_scores.values() if v >= SUPPORT_KEY_SCORE)
     else:
         top, margin, win_key = 0.0, 0.0, "none"
+        ref_score = 0.0
+        support_scores = {"display_name": 0.0, "date": 0.0, "spec_1": 0.0, "spec_2": 0.0}
+        support_count = 0
     selected_text = combined[sel_i] if sel_i is not None else ""
     text_plausible = _looks_like_plausible_identifier(selected_text)
-    confident = (top >= CONFIDENT_SCORE) and (margin >= CONFIDENT_MARGIN) and text_plausible
+
+    # REFが完全一致(100点)なら、他キーの結果に関わらず確信ありとする。
+    # そうでなければmargin基準ではなく、補助キー(display_name/date/spec_1/spec_2)が
+    # 何本高スコアで揃っているかで判断する(理由は REF_EXACT_SCORE 定義部のコメント参照)。
+    if ref_score >= REF_EXACT_SCORE:
+        confident = True
+        confident_reason = "ref_exact_match"
+    elif support_count >= SUPPORT_KEY_MIN_COUNT and text_plausible:
+        confident = True
+        confident_reason = f"support_keys>={SUPPORT_KEY_MIN_COUNT}"
+    else:
+        confident = False
+        confident_reason = "insufficient_evidence"
 
     # ===== 本番形式へ =====
     results: list[dict[str, Any]] = []
@@ -497,6 +823,34 @@ def match_text_to_mask_main(
                 "forced_angle": FORCED_ANGLE,
             })
 
+    # ===== 全品目の割当結果(2026-08-26試験導入) =====
+    # assign は実際には1回の認識でマスタ全品目 x 全マスクの最適割当を一括で
+    # 解いた結果であり、target_j(query)だけでなく他の品目にもそれぞれ
+    # マスクが割り当たっている。「query以外の品目も正しく別マスクへ選べて
+    # いるか」を確認したいとの要望に対応し、全品目分の割当結果を出力する。
+    all_assignments = []
+    for j, m in enumerate(master):
+        i = assign.get(j)
+        if i is None:
+            all_assignments.append({
+                "book_name": m.get("book_name", ""),
+                "display_name": m.get("display_name", ""),
+                "assigned_mask": None,
+                "winning_key": None,
+                "score": None,
+                "is_query": (j == target_j),
+            })
+            continue
+        wk_j = int(np.argmax(centered[i, j]))
+        all_assignments.append({
+            "book_name": m.get("book_name", ""),
+            "display_name": m.get("display_name", ""),
+            "assigned_mask": f"mask_{i + 1}",
+            "winning_key": key_names[wk_j],
+            "score": round(float(per_key[i, j, wk_j]), 1),
+            "is_query": (j == target_j),
+        })
+
     # ===== デバッグ保存 =====
     try:
         shot_dir.mkdir(parents=True, exist_ok=True)
@@ -506,17 +860,27 @@ def match_text_to_mask_main(
                 "master_json": str(master_path),
                 "master_row": master[target_j],
                 "assign_method": method,
+                "score_combine_method": SCORE_COMBINE_METHOD,
                 "threshold": threshold,
                 "selected_mask": None if sel_i is None else f"mask_{sel_i + 1}",
+                "independent_selected_mask": None if independent_i is None else f"mask_{independent_i + 1}",
+                "hungarian_changed_selection": bool(hungarian_changed_selection),
                 "selected_score": round(top, 1),
                 "winning_key": win_key,
                 "margin": round(margin, 1),
                 "selected_text_len": len(_normalize(selected_text)),
                 "text_plausible": bool(text_plausible),
+                "ref_score": round(ref_score, 1),
+                "support_scores": {k: round(v, 1) for k, v in support_scores.items()},
+                "support_count": support_count,
                 "confident": bool(confident),
+                "confident_reason": confident_reason,
                 "confident_rule": (
-                    f"score>={CONFIDENT_SCORE} and margin>={CONFIDENT_MARGIN} "
-                    f"and text_plausible(len>={MIN_TEXT_LEN_FOR_PLAUSIBLE} and looks like REF/date)"
+                    f"ref_score>={REF_EXACT_SCORE} で無条件に確信あり。"
+                    f"それ以外は display_name/date/spec_1/spec_2 のうち"
+                    f"{SUPPORT_KEY_MIN_COUNT}本以上が{SUPPORT_KEY_SCORE}点以上、"
+                    f"かつtext_plausible(len>={MIN_TEXT_LEN_FOR_PLAUSIBLE} and looks like REF/date)"
+                    "で確信あり(marginは判定に使わない、参考値としてのみ保存)"
                 ),
                 "per_mask": [
                     {
@@ -530,6 +894,7 @@ def match_text_to_mask_main(
                     }
                     for i in range(n_mask)
                 ],
+                "all_assignments": all_assignments,
                 "ocr_assignments": ocr_debug,
             }, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -537,9 +902,42 @@ def match_text_to_mask_main(
     except Exception as e:
         print(f"[multikey] デバッグ保存に失敗（処理は継続）: {e}")
 
+    if sel_i is not None:
+        _save_perkey_overlay(
+            shot_dir=shot_dir,
+            rgb_path=rgb_path,
+            ocr_json_path=ocr_json_path,
+            ocr_debug=ocr_debug,
+            sel_mask_name=f"mask_{sel_i + 1}",
+            keys_of_target=_keys_of(master[target_j]),
+        )
+    if save_all_assignments:
+        # 全マスク x 全品目の割当結果を1枚にまとめて可視化する
+        # (2026-08-26試験導入)。「1回の認識でマスタ全品目に対しマスクが
+        # 割り当たっているはずなので、query以外も正しく別マスクへ選べて
+        # いるか一望で確認したい」との要望に対応。
+        mask_to_item = {}
+        for a in all_assignments:
+            if a["assigned_mask"] is None:
+                continue
+            mi = int(a["assigned_mask"].rsplit("_", 1)[1]) - 1
+            mask_to_item[mi] = {
+                "book_name": a["book_name"] or a["display_name"] or "?",
+                "is_query": a["is_query"],
+                "score": a["score"],
+            }
+        _save_assignment_overview(
+            shot_dir=shot_dir,
+            rgb_path=rgb_path,
+            boxes=boxes,
+            mask_to_item=mask_to_item,
+        )
+
     if not confident:
+        support_str = ", ".join(f"{k}={v:.1f}" for k, v in support_scores.items())
         print(f"[multikey] 警告: query='{query}' は確信度が低いです "
-              f"(score={top:.1f}, margin={margin:.1f})")
+              f"(ref_score={ref_score:.1f}, support_count={support_count}/{SUPPORT_KEY_MIN_COUNT}, "
+              f"{support_str})")
 
     return results
 

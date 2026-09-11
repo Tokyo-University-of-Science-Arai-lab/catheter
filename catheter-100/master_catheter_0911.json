@@ -1,0 +1,398 @@
+[ 
+  {
+  "book_name": "10CSW02020",
+  "display_name": "Wallaby Avenir Coil System",
+  "LOT": "WCS11772",
+  "expiration date": "2031-12-14",
+  "ISBN_number": "不明",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "15.2",
+  "SPEC_1": "2 mm",
+  "SPEC_2": "20 cm"
+  },
+
+  {
+    "book_name": "AIN-CKI-200R",
+    "display_name": "CHIKAI",
+    "LOT": "260127A44A",
+    "expiration date": "2029-01",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "15.0",
+    "SPEC_1": "0.014",
+    "SPEC_2": "200cm"
+  },
+
+  {
+  "book_name": "MONORAIL",
+  "display_name": "Coyote ES",
+  "LOT": "",
+  "expiration date": "2027-05-01",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "13",
+  "SPEC_1": "3.0 mm",
+  "SPEC_2": "40 mm"
+  },
+
+  {
+    "book_name": "ESC0407",
+    "display_name": "TransForm",
+    "LOT": "不明",
+    "expiration date": "2027-10-28",
+    "ISBN_number": "9784297118846",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.5",
+    "SPEC_1": "4 mm",
+    "SPEC_2": "7 cm"
+  },
+
+  {
+    "book_name": "MAT-110-110",
+    "display_name": "Riptide Large Bore Aspiration Tubing",
+    "LOT": "442733",
+    "expiration date": "2027-10-14",
+    "ISBN_number": "9784789016278",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.0",
+    "SPEC_1": "112",
+    "SPEC_2": "284 cm"
+  },
+
+  {
+    "book_name": "XT275081",
+    "display_name": "Excelsior XT-27",
+    "LOT": "不明",
+    "expiration date": "2028-12-03",
+    "ISBN_number": "9784489020360",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "18",
+    "SPEC_1": "150 cm",
+    "SPEC_2": "6 cm"
+  },
+
+  {
+    "book_name": "EZAS3021",
+    "display_name": "Neuroform Atlas",
+    "LOT": "26022095",
+    "expiration date": "2028-12-09",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "16.8",
+    "SPEC_1": "3.0 mm",
+    "SPEC_2": "21 mm"
+  },
+
+  {
+    "book_name": "FC-3-6-3D",
+    "display_name": "Axium Prime",
+    "LOT": "229115276",
+    "expiration date": "2027-06-30",
+    "ISBN_number": "9784297118846",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.1",
+    "SPEC_1": "3 mm",
+    "SPEC_2": "6 cm"
+  },
+
+  {
+    "book_name": "10CSW01515",
+    "display_name": "Wallaby Avenir Coil System",
+    "LOT": "WCS12612",
+    "expiration date": "2031-04-14",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "15.2",
+    "SPEC_1": "1.5 mm",
+    "SPEC_2": "15 cm"
+  },
+
+  {
+    "book_name": "393-020310",
+    "display_name": "i-ED COIL",
+    "LOT": "KR045298",
+    "expiration date": "2028-04-30",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "14.7",
+    "SPEC_1": "2-3 mm",
+    "SPEC_2": "10 cm"
+  },
+
+  {
+    "book_name": "FG15160-0615-1S",
+    "display_name": "Phenom",
+    "LOT": "232896730",
+    "expiration date": "2028-12-10",
+    "ISBN_number": "9784781908137",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.0",
+    "SPEC_1": "27",
+    "SPEC_2": "160 cm"
+  },
+
+  {
+    "book_name": "SPD-040-320",
+    "display_name": "SpiderFX",
+    "LOT": "C230087",
+    "expiration date": "2027-11-30",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "20",
+    "SPEC_1": "4.0 mm",
+    "SPEC_2": ".014 in"
+  },
+
+  {
+    "book_name": "INC-11814-146",
+    "display_name": "AXS Vecta 46",
+    "LOT": "不明",
+    "expiration date": "2028-09-22",
+    "ISBN_number": "9784798068299",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "22.2",
+    "SPEC_1": "0.046 in",
+    "SPEC_2": "146 cm"
+  },
+
+  {
+    "book_name": "AIN-CHI-10-200R",
+    "display_name": "CHIKAI 10",
+    "LOT": "260127A40A",
+    "expiration date": "2029-01",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "15.0",
+    "SPEC_1": "0.010",
+    "SPEC_2": "200 cm"
+  },
+   
+  {
+  "book_name": "OPTI0408CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F260200861",
+  "expiration date": "2030-08-07",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+  "SPEC_1": "4 mm",
+  "SPEC_2": "8 cm"
+  },
+
+  {
+    "book_name": "ESC0305",
+    "display_name": "TransForm",
+    "LOT": "不明",
+    "expiration date": "2027-12-02",
+    "ISBN_number": "9784297118846",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.5",
+    "SPEC_1": "3 mm",
+    "SPEC_2": "5 cm"
+  },
+
+  {
+  "book_name": "MIV-2N316",
+  "display_name": "Defrictor",
+  "LOT": "51172N07",
+  "expiration date": "2028年 10月",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "14.5",
+  "SPEC_1": "3.0 mm",
+  "SPEC_2": "40 mm"
+  },
+
+  {
+  "book_name": "OPTI0152CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F260200774",
+  "expiration date": "2031-02-17",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+    "SPEC_1": "1.5 mm",
+    "SPEC_2": "2 cm"
+  },
+
+  {
+    "book_name": "C1775ST",
+    "display_name": "Excelsior XT-17",
+    "LOT": "26060585",
+    "expiration date": "2028-01-03",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.0",
+    "SPEC_1": "150 cm",
+    "SPEC_2": "7.5 cm"
+  },
+
+  {
+    "book_name": "FG13160-0615-1S",
+    "display_name": "Phenom",
+    "LOT": "232639510",
+    "expiration date": "2028-11-05",
+    "ISBN_number": "9784781908137",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.0",
+    "SPEC_1": "21",
+    "SPEC_2": "160 cm"
+  },
+
+  {
+    "book_name": "DAC6F115",
+    "display_name": "Esperance Distal Access Catheter",
+    "LOT": "DAC00239",
+    "expiration date": "2027-01-16",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "27.0",
+    "SPEC_1": "115cm",
+    "SPEC_2": "6F"
+  },
+
+  {
+  "book_name": "SD-40040",
+  "display_name": "SHIDEN",
+  "LOT": "SR045482",
+  "expiration date": "2028-03-31",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "14.5",
+  "SPEC_1": "3.0 mm",
+  "SPEC_2": "40 mm"
+  },
+
+  {
+    "book_name": "KMDA044178",
+    "display_name": "Guidepost",
+    "LOT": "不明",
+    "expiration date": "2029-03-25",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "26",
+    "SPEC_1": "3.2/3.4Fr.",
+    "SPEC_2": "120cm"
+  },
+
+  {
+    "book_name": "APB-1.5-2-HX-ES",
+    "display_name": "Axium Prime",
+    "LOT": "230926809",
+    "expiration date": "2028-04-09",
+    "ISBN_number": "9784297118846",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.1",
+    "SPEC_1": "1.5 mm",
+    "SPEC_2": "2 cm"
+  },
+
+  {
+    "book_name": "SS2-40-070H",
+    "display_name": "SHOURYU2",
+    "LOT": "KR046055",
+    "expiration date": "2029-03-31",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.1",
+    "SPEC_1": "4.0 mm",
+    "SPEC_2": "7 mm"
+  },
+
+  {
+    "book_name": "1681189",
+    "display_name": "Excelsior SL-10",
+    "LOT": "26124294",
+    "expiration date": "2028-02-18",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.0",
+    "SPEC_1": "150 cm",
+    "SPEC_2": "6 cm"
+  },
+
+  {
+  "book_name": "10CSW01010",
+  "display_name": "Wallaby Avenir Coil System",
+  "LOT": "WCS12609",
+  "expiration date": "2031-05-09",
+  "ISBN_number": "不明",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "15.2",
+  "SPEC_1": "1 mm",
+  "SPEC_2": "10 cm"
+  },
+
+  {
+  "book_name": "OPTI0204CSS10",
+  "display_name": "OPTIMA",
+  "LOT": "F251100383",
+  "expiration date": "2030-11-11",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "20",
+  "SPEC_1": "2 mm",
+  "SPEC_2": "4 cm"
+  },
+
+  {
+  "book_name": "SSTD215STR",
+  "display_name": "Synchro SELECT",
+  "LOT": "不明",
+  "expiration date": "2029-02-24",
+  "ISBN_number": "9784254209457",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "18.0",
+  "SPEC_1": "0.014 in",
+  "SPEC_2": "215 cm"
+  },
+
+  {
+  "book_name": "373-040830",
+  "display_name": "i-ED COIL",
+  "LOT": "KR104430",
+  "expiration date": "2027-10-31",
+  "ISBN_number": "9784254209457",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "15",
+  "SPEC_1": "4-8 mm",
+  "SPEC_2": "30cm"
+  },
+
+  {
+  "book_name": "612104",
+  "display_name": "Target XL",
+  "LOT": "不明",
+  "expiration date": "2030-06-07",
+  "ISBN_number": "9784627846913",
+  "bookshelf_ID": "1-1-1-1",
+  "book_width": "17",
+  "SPEC_1": "10 mm",
+  "SPEC_2": "40 cm"
+  },
+
+  {
+    "book_name": "MC1715000",
+    "display_name": "pNOVUS",
+    "LOT": "MCR00341",
+    "expiration date": "2028-11-27",
+    "ISBN_number": "9784798068299",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "21.0",
+    "SPEC_1": "17",
+    "SPEC_2": "150 cm"
+  },
+
+  {
+    "book_name": "APB-2-3-HX-ES",
+    "display_name": "Axium Prime",
+    "LOT": "231892790",
+    "expiration date": "2028-08-05",
+    "ISBN_number": "9784297118846",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "17.1",
+    "SPEC_1": "2 mm",
+    "SPEC_2": "3 cm"
+  }
+
+]

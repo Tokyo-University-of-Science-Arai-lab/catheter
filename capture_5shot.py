@@ -2,25 +2,29 @@
 """
 オフライン認識評価用に、同じ棚を N 枚撮り直すスクリプト。
 
-1枚ごとに Enter 待ちで止まるので、その間にカテーテルの配置や向きを変える。
+1枚ごとにライブプレビューを表示して止まるので、その間にカテーテルの配置や向きを変え、
+プレビューウィンドウ上で Enter を押すと撮影する（ESC で中断）。
 配置を変えずに撮ると 5 枚が同じ画像になり、ばらつきの評価にならないため。
 
-保存先: captures/5shot_catheter/<1〜N>/   （既存ファイルは上書き）
+保存先: captures/5shot_catheter/<実行日時>/<1〜N>/   （実行のたびに新しいフォルダ、上書きしない）
   after_init_rgb.png    : RGB画像 (BGR PNG)
   after_init_depth.npy  : 深度画像 (uint16, Z16)
   camera_params.json    : カメラ内部パラメータ
 
 使い方（ターミナルから対話実行）:
   source .pro_hand_book_fixed/bin/activate
-  python capture_5shot.py                 # 1〜5番を撮り直す
+  python capture_5shot.py                 # 1〜5番を撮り直す（新しいフォルダに保存）
   python capture_5shot.py --n-shots 3     # 1〜3番だけ
-  python capture_5shot.py --start 3       # 3番から5番まで（一部だけ撮り直す）
+  python capture_5shot.py --start 3       # 3番から5番まで（同じ実行内での一部撮り直し）
+  python capture_5shot.py --run-dir captures/5shot_catheter/20260824_120000 --start 3
+                                           # 既存フォルダに追記・上書きしたい場合に明示指定
 """
 
 import argparse
 import json
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -46,12 +50,33 @@ N_RETRY          = 3
 def parse_args():
     parser = argparse.ArgumentParser(description="評価用に棚を撮り直す（Enterごとに1枚）")
     parser.add_argument("--save-root", type=Path, default=DEFAULT_SAVE_ROOT,
-                        help=f"保存先（デフォルト: {DEFAULT_SAVE_ROOT}）")
+                        help=f"新しい実行フォルダを作る親ディレクトリ（デフォルト: {DEFAULT_SAVE_ROOT}）")
+    parser.add_argument("--run-dir", type=Path, default=None,
+                        help="このフォルダに直接保存する（新規フォルダを作らず、既存の実行に"
+                             "追記・上書きしたい場合に指定）")
     parser.add_argument("--n-shots", type=int, default=N_SHOTS,
                         help=f"撮影する枚数（デフォルト: {N_SHOTS}）")
     parser.add_argument("--start", type=int, default=1,
                         help="開始番号。途中だけ撮り直すときに使う（デフォルト: 1）")
     return parser.parse_args()
+
+
+def make_unique_run_dir(base_dir: Path, timestamp: str) -> Path:
+    """base_dir/<timestamp> を作る。同じ秒に複数回実行した場合は _001, _002 ... を付ける。"""
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    run_dir = base_dir / timestamp
+    if not run_dir.exists():
+        run_dir.mkdir(parents=True)
+        return run_dir
+
+    for i in range(1, 1000):
+        candidate = base_dir / f"{timestamp}_{i:03d}"
+        if not candidate.exists():
+            candidate.mkdir(parents=True)
+            return candidate
+
+    raise RuntimeError(f"unique run dir を作れませんでした: {base_dir}/{timestamp}_XXX")
 
 
 class Camera:
@@ -106,6 +131,17 @@ class Camera:
         for _ in range(n):
             self.pipe.wait_for_frames(FRAME_TIMEOUT_MS)
 
+    def preview_color_frame(self):
+        """プレビュー表示用に、整列済みのcolorフレームを1枚返す（取得失敗時はNone）。"""
+        try:
+            aligned = self.align.process(self.pipe.wait_for_frames(FRAME_TIMEOUT_MS))
+            color_frame = aligned.get_color_frame()
+            if color_frame:
+                return np.asanyarray(color_frame.get_data())
+        except RuntimeError:
+            pass
+        return None
+
     def grab(self, n_settle: int):
         """
         整列済みの (color, depth) を返す。直前の n_settle 枚は捨てる。
@@ -140,6 +176,28 @@ class Camera:
         raise RuntimeError(f"フレームを取得できませんでした: {last_error}")
 
 
+PREVIEW_WINDOW = "capture_5shot preview (Enter:撮影 / ESC:中断)"
+
+
+def wait_for_capture_key(cam: "Camera") -> bool:
+    """ライブプレビューを表示しつつキー入力を待つ。EnterならTrue、ESCならFalseを返す。"""
+    cv2.namedWindow(PREVIEW_WINDOW, cv2.WINDOW_NORMAL)
+    try:
+        while True:
+            frame = cam.preview_color_frame()
+            if frame is not None:
+                cv2.imshow(PREVIEW_WINDOW, frame)
+            key = cv2.waitKey(30) & 0xFF
+            if key in (13, 10):  # Enter
+                return True
+            if key == 27:  # ESC
+                return False
+            if cv2.getWindowProperty(PREVIEW_WINDOW, cv2.WND_PROP_VISIBLE) < 1:
+                return False
+    finally:
+        cv2.destroyWindow(PREVIEW_WINDOW)
+
+
 def save_shot(outdir: Path, color_np, depth_np, camera_params):
     outdir.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(outdir / "after_init_rgb.png"), color_np)
@@ -151,21 +209,26 @@ def save_shot(outdir: Path, color_np, depth_np, camera_params):
 
 def main():
     args = parse_args()
-    save_root = args.save_root
     start_idx = args.start
     end_idx = args.start + args.n_shots - 1
 
-    if not sys.stdin.isatty():
-        print("エラー: このスクリプトは Enter 待ちで進むため、ターミナルから実行してください。")
-        return 1
+    if args.run_dir is not None:
+        run_dir = args.run_dir
+        run_dir.mkdir(parents=True, exist_ok=True)
+        overwrite_note = "（このフォルダ内で既存ファイルは上書き）"
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = make_unique_run_dir(args.save_root, timestamp)
+        overwrite_note = "（新規フォルダなので上書きなし）"
 
     print("=" * 55)
     print("  評価用 撮り直しスクリプト")
     print("=" * 55)
-    print(f"保存先   : {save_root.resolve()}")
-    print(f"撮影範囲 : {start_idx} 〜 {end_idx}（既存ファイルは上書き）")
+    print(f"保存先   : {run_dir.resolve()}")
+    print(f"撮影範囲 : {start_idx} 〜 {end_idx} {overwrite_note}")
     print()
-    print("  ※ 1枚ごとに止まります。その間にカテーテルの配置を変えてください。")
+    print("  ※ 1枚ごとにプレビューウィンドウが開きます。その間にカテーテルの配置を")
+    print("    変え、ウィンドウ上で Enter を押すと撮影します（ESCで中断）。")
     print("  ※ 全20種がフレームに入っているか確認してください。")
     print("=" * 55)
 
@@ -178,13 +241,16 @@ def main():
 
         idx = start_idx
         while idx <= end_idx:
-            outdir = save_root / str(idx)
+            outdir = run_dir / str(idx)
             mark = "（上書き）" if (outdir / "after_init_rgb.png").exists() else "（新規）"
 
             print(f"\n── {idx} 枚目 {mark} ──")
+            print("  配置を変えたら、プレビューウィンドウでEnterを押して撮影 > ")
             try:
-                input("  配置を変えたら Enter を押して撮影 > ")
-            except (EOFError, KeyboardInterrupt):
+                if not wait_for_capture_key(cam):
+                    print("\n中断しました。")
+                    break
+            except KeyboardInterrupt:
                 print("\n中断しました。")
                 break
 
@@ -212,14 +278,17 @@ def main():
     finally:
         cam.stop()
 
-    print(f"\n撮影完了: {len(saved)} 枚  → {save_root.resolve()}")
+    print(f"\n撮影完了: {len(saved)} 枚  → {run_dir.resolve()}")
     if failed:
         print(f"未取得の番号: {sorted(set(failed))}")
-        print(f"  撮り直し例: python capture_5shot.py --start {sorted(set(failed))[0]} --n-shots 1")
+        print(
+            f"  撮り直し例: python capture_5shot.py --run-dir {run_dir} "
+            f"--start {sorted(set(failed))[0]} --n-shots 1"
+        )
         return 1
 
     print("次のコマンドで評価を実行できます:")
-    print("  python offline_pointcloud_debug_SAM3.py")
+    print("  python offline_pointcloud_debug_SAM3_catheter.py")
     return 0
 
 

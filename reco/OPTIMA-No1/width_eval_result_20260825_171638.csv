@@ -1,0 +1,2 @@
+﻿shot,query,book_name_true,display_name,book_width_mm_true,book_width_mm_pred,abs_error_mm,retry_count,elapsed_sec,error
+1__OPTI0408CSS10,OPTI0408CSS10,OPTI0408CSS10,OPTIMA,17,,,0,,"RuntimeError: target point estimation failed: {'ok': False, 'target_m': None, 'num_candidates': 0}"

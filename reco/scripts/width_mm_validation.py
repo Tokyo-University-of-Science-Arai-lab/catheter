@@ -16,8 +16,9 @@ depth_shots自体が本来のパイプラインが得る正しい向きのデー
 
 reco/*/内のオリジナルdepth_shots/は一切変更しない(読み取り専用)。
 
-作業フォルダ・結果CSVの名前には実行日時を必ず含める(2026-08-21、ユーザー要望)。
-`--label`で意味のある名前も併用できる。
+作業フォルダ・結果CSVの名前には実行日時のみを付与する(2026-08-21、ユーザー要望:
+必ず含める / 2026-08-25、ユーザー要望: ファイル名が長くなるため`--label`は廃止し
+日時のみにする)。
 
 stand-100の各アイテムの作業フォルダ名は`{処理順}-{使用した画像番号}-{display_name}`
 (例: `23-2-Target_XL`)。処理順(i+1)はこの実行内でのjobs一覧上の通し番号で、
@@ -27,12 +28,34 @@ CSVの`shot`列自体は従来通り`{画像番号}__{REF}`のまま(一意性�
 diagonal-40は1画像=1アイテムで曖昧さがないため、work_root直下のフォルダ名は
 従来通りshot_dir.name(例: `Target_R`)のまま変更していない。
 
-実行:
-    cd ~/pro_book/pro_hand_book_python
-    .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset diagonal-40
-    .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset stand-100
-    .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset stand-100 --label rotfix
-    .pro_hand_book_fixed/bin/python3.10 reco/scripts/width_mm_validation.py --dataset diagonal-40 --only Target_R --verbose
+【2026-08-25、ユーザー要望】品目数(旧20固定)・画像枚数(旧5固定)を任意件数に一般化した。
+`--dataset`に新しいデータセット名(例: catheter-100-new1)を渡すだけで、そのデータセットの
+`reco/<dataset>/depth_shots/`配下の画像枚数ぶん × `--master-json`の品目数ぶんを総当たりする
+(stand-100と同じ「画像×マスタ全品目」方式。diagonal-40だけ従来通り1画像=1品目固定の特別扱い)。
+新しいデータセットを追加する場合は、既存のstand-100と同じ構成
+(`reco/<dataset>/depth_shots/<画像名>/{after_init_rgb.png, after_init_depth.npy,
+camera_params.json}`)を用意し、マスタJSONは`--master-json`で任意のパスを渡せる
+(省略時はreco/master_catheter_reco.jsonの20品目)。
+
+使い方:
+    python3 reco/scripts/width_mm_validation.py --dataset <データセット名> [オプション]
+
+    --dataset (必須)   reco/<名前>/ のデータセット名(stand-100, diagonal-40, 任意の新規名)
+    --master-json      クエリ一覧のマスタJSON。省略時は reco/master_catheter_reco.json(20品目)
+    --only <画像名>    その画像フォルダ/shotだけ処理する(スモークテスト用)
+    --limit N          先頭N件だけ処理する
+    --sam-device       既定 "gpu"
+    --no-retry         推定幅誤差5mm以上でのリトライを無効化(A/B比較で単一要因だけ見たい場合用)
+    --no-report        完了後の自動Excelレポート生成(reco_result_<日時>/)を無効化
+    --work-suffix      【非推奨・後方互換用】接尾辞を直接指定。通常は省略して自動の日時のみにする
+    --verbose          失敗時にトレースバックを表示
+
+実行例:
+    python3 reco/scripts/width_mm_validation.py --dataset diagonal-40
+    python3 reco/scripts/width_mm_validation.py --dataset stand-100
+    python3 reco/scripts/width_mm_validation.py --dataset diagonal-40 --only Target_R --verbose
+    # 新データセット(任意品目数・任意画像枚数)の例:
+    python3 reco/scripts/width_mm_validation.py --dataset ROOB-1 --master-json catheter-100/master_catheter_2.json
 
 本番採用済みの簡易版パイプライン(get_book_points_sam3_refined_sam2_width.py、SAM3マスク選択
 →depth外れ値除去→RANSAC平面フィット1回→SAM2互換幅算出の4段階、詳細はHANDOFF 8.2節参照)を
@@ -101,7 +124,11 @@ RECO_ROOT = Path(__file__).resolve().parents[1]  # .../pro_hand_book_python/reco
 REPO_ROOT = RECO_ROOT.parent  # .../pro_hand_book_python
 sys.path.insert(0, str(REPO_ROOT))
 
-MASTER_JSON = RECO_ROOT / "master_catheter_reco.json"
+# multikey_matcher.py自身のDEFAULT_MASTER_JSONと同じファイルを指す(2026-08-25 バグ修正)。
+# reco/master_catheter_reco.jsonは"参照・閲覧用"の複製(reco/README.md参照)で、
+# SPEC_1/SPEC_2追加(2026-08-25)がここには反映されておらず古いまま(color_rgbが残存)
+# だったため、これをデフォルトにすると識別照合が古いマスタ相当に劣化してしまう。
+DEFAULT_MASTER_JSON = REPO_ROOT / "catheter-100" / "master_catheter_20260216.json"
 
 # diagonal-40/depth_shots/<name> のフォルダ名(末尾の _L/_R を除いた品目部分) ->
 # マスタJSONのbook_name(multikey_matcherのqueryとして渡すキー)。
@@ -129,8 +156,8 @@ DIAGONAL_PRODUCT_TO_BOOKNAME = {
 }
 
 
-def load_master() -> dict[str, dict]:
-    with open(MASTER_JSON, "r", encoding="utf-8") as f:
+def load_master(master_json_path: Path) -> dict[str, dict]:
+    with open(master_json_path, "r", encoding="utf-8") as f:
         rows = json.load(f)
     return {r["book_name"]: r for r in rows}
 
@@ -265,23 +292,29 @@ def run_one_with_retry(shot_name: str, src_dir: Path, query_book_name: str, work
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", choices=["diagonal-40", "stand-100"], required=True)
+    ap.add_argument("--dataset", required=True,
+                    help="reco/<dataset>/ 配下のデータセット名(例: stand-100, diagonal-40, "
+                         "または新規に用意したデータセット名)。'diagonal-40'のみ、1画像=1品目の"
+                         "特別扱い(DIAGONAL_PRODUCT_TO_BOOKNAME、要ハードコード対応)。"
+                         "それ以外は全て、depth_shots/配下の全画像 × マスタJSON全品目の"
+                         "総当たり(stand-100と同じ方式)で、画像枚数・品目数とも任意の件数に対応する。")
+    ap.add_argument("--master-json", default=None,
+                    help="クエリ(品目)一覧のマスタJSONパス。省略時は "
+                         f"{DEFAULT_MASTER_JSON} (20品目)。品目数に制限は無く、"
+                         "master_row必須キーはbook_name/display_name/expiration date/"
+                         "book_width等(_keys_of参照)。")
     ap.add_argument("--only", default=None, help="このshot名だけ処理する(スモークテスト用)")
     ap.add_argument("--limit", type=int, default=None, help="先頭N件だけ処理する")
     ap.add_argument("--sam-device", default="gpu")
-    ap.add_argument("--label", default=None,
-                    help="work_root/out_csvのファイル名に付与する追加ラベル(例: rotfix)。"
-                         "実行日時(必須、常に付与)の後ろに追加される"
-                         "(例: --label rotfix -> _20260821_143000_rotfix)。")
     ap.add_argument("--work-suffix", default=None,
                     help="【非推奨、後方互換用】接尾辞を直接指定する。指定すると実行日時は"
-                         "付与されない。通常は--labelを使うこと。")
+                         "付与されない。通常は省略して自動の日時のみにすること。")
     ap.add_argument("--no-retry", action="store_true",
                     help="推定幅誤差5mm以上でのリトライを無効化する(A/B比較で単一要因だけを"
                          "見たい場合用)。省略時はリトライ有効。")
     ap.add_argument("--no-report", action="store_true",
                     help="認識完了後の自動レポート生成(build_width_eval_report.py相当、"
-                         "reco_result_<日時>/にxlsx+images+work symlink)を無効化する。"
+                         "reco_result<suffix>/にxlsx+imagesを追加生成)を無効化する。"
                          "省略時は自動生成される(2026-08-22、ユーザー要望: 「認識を回したら"
                          "同時にreco_result_.../のようなレポートも作られるようにしてほしい」)。")
     ap.add_argument("--verbose", action="store_true")
@@ -289,25 +322,44 @@ def main() -> None:
 
     if args.work_suffix is None:
         # 2026-08-21、ユーザー要望: 実行日時は必ず含める(フォルダ/ファイルの区別のため)。
-        # --labelで意味のある名前も併用できる(例: _20260821_143000_rotfix)。
+        # 2026-08-25、ユーザー要望: ファイル名が長くなるため、日時のみにする(--labelは廃止)。
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        args.work_suffix = f"_{timestamp}" + (f"_{args.label}" if args.label else "")
+        args.work_suffix = f"_{timestamp}"
 
-    master_by_bookname = load_master()
+    master_json_path = Path(args.master_json) if args.master_json else DEFAULT_MASTER_JSON
+    master_by_bookname = load_master(master_json_path)
 
     # get_book_points_sam3_refined_sam2_width.pyは query/shot_dir 以外に
-    # sam_device・depth_merge_tolerance_raw等ごく僅かなキーワード引数しか受け付けない
-    # (encoder_path/interactive等は存在しない)。
-    runner_kwargs = dict(sam_device=args.sam_device)
+    # sam_device・depth_merge_tolerance_raw・master_json等ごく僅かなキーワード引数しか
+    # 受け付けない(encoder_path/interactive等は存在しない)。
+    # 【2026-08-25 バグ修正】--master-jsonをここまで渡し忘れていたため、実際の識別照合
+    # (multikey_matcherのdisplay_name/date/spec_1/spec_2キー)は常にデフォルトの
+    # 20品目マスタ(master_catheter_20260216.json)で行われ、新しいマスタの品目は
+    # 「マスタに無いためquery単独で採点」(REFの数字一致のみ)に落ちて識別精度が
+    # 大きく悪化していた(ユーザー報告により発覚)。--master-jsonをここにも渡すことで、
+    # 外側のクエリ一覧と実際の照合で同じマスタを使うようにした。
+    runner_kwargs = dict(sam_device=args.sam_device, master_json=str(master_json_path))
 
     dataset_dir = RECO_ROOT / args.dataset
     depth_shots_dir = dataset_dir / "depth_shots"
-    work_root = dataset_dir / f"width_eval_work{args.work_suffix}"
+    # 2026-08-25、ユーザー要望: 「width_eval_workフォルダは不要、reco_result内に入れて
+    # ほしい」。以前はwidth_eval_work<suffix>/を別途作り、レポート生成時にreco_result側
+    # からシンボリックリンクで参照していたが、reco_result_<suffix>/work/を最初から
+    # 直接の作業フォルダにすることで、実行のたびにreco/<dataset>/直下に別フォルダが
+    # 増えるのをやめ、1回の実行の成果物が1つのreco_result_<suffix>/に完結するようにした。
+    work_root = dataset_dir / f"reco_result{args.work_suffix}" / "work"
     out_csv = dataset_dir / f"width_eval_result{args.work_suffix}.csv"
+
+    # diagonal-40だけ「1画像=1品目固定」の特別扱い(DIAGONAL_PRODUCT_TO_BOOKNAME、
+    # データセット固有のハードコード対応が要る)。それ以外は全て「画像×マスタ全品目の
+    # 総当たり」(stand-100と同じ方式)で、depth_shots/の画像枚数・マスタの品目数とも
+    # ループが動的にiterateするだけなので任意件数に対応する(2026-08-25、ユーザー要望:
+    # 20品目・5画像に限定せず任意件数で回せるようにしてほしい)。
+    is_cross_mode = args.dataset != "diagonal-40"
 
     jobs: list[tuple[str, Path, str]] = []  # (shot_name, src_dir, query_book_name)
 
-    if args.dataset == "diagonal-40":
+    if not is_cross_mode:
         for shot_dir in sorted(depth_shots_dir.iterdir()):
             if not shot_dir.is_dir():
                 continue
@@ -317,7 +369,7 @@ def main() -> None:
                 print(f"⚠ 品目マッピング未登録のためスキップ: {shot_dir.name} (base={base})")
                 continue
             jobs.append((shot_dir.name, shot_dir, book_name))
-    else:  # stand-100: 各棚配置に全20品目のqueryを試す
+    else:  # 各棚配置(depth_shots/の各サブフォルダ)に、マスタ全品目のqueryを試す
         for shot_dir in sorted(depth_shots_dir.iterdir()):
             if not shot_dir.is_dir():
                 continue
@@ -365,9 +417,14 @@ def main() -> None:
                 "error": "",
             }
             folder_name = None
-            if args.dataset == "stand-100":
+            if is_cross_mode:
                 image_id = shot_name.split("__", 1)[0]
-                folder_name = f"{i + 1}-{image_id}-{safe_name(row['display_name'] or shot_name)}"
+                # display_nameだけだと複数品目で同名になりうる(例: master_catheter_2.jsonは
+                # 5品目とも display_name="OPTIMA")。book_name(query、必ず一意)を末尾に
+                # 付けてフォルダ名を一意にする(2026-08-25、resolve_work_dirが「複数候補が
+                # 一致し一意に決まらない」→final.pngが見つからない、の連鎖バグの修正)。
+                folder_name = (f"{i + 1}-{image_id}-{safe_name(row['display_name'] or shot_name)}"
+                                f"-{safe_name(book_name)}")
             else:
                 # diagonal-40は1画像=1アイテムで画像番号の概念が無いため、
                 # {処理順}-{shot名}とする(2026-08-22、ユーザー要望:
@@ -396,14 +453,31 @@ def main() -> None:
 
     if not args.no_report:
         # reco/scripts/ 内の build_width_eval_report.py を呼び、この実行のsuffixから
-        # そのままxlsx+images+work symlink付きのreco_result_<日時>/を作る
+        # そのままxlsx+images付きのreco_result<suffix>/(work/は既にこの中にある)を仕上げる
         # (2026-08-22、ユーザー要望: 認識実行と同時にレポートも生成してほしい)。
+        # 2026-08-25、work_root自体をreco_result<suffix>/work/にしたため、レポート生成の
+        # タイムスタンプも同じsuffixに揃えた(以前は別タイムスタンプでreco_result_<日時2>/を
+        # 新規に作り、width_eval_work<suffix>/をシンボリックリンクしていた)。
         try:
             from build_width_eval_report import build_dataset_report
-            report_timestamp = time.strftime("%Y%m%d_%H%M%S")
-            build_dataset_report(args.dataset, suffix=args.work_suffix, report_timestamp=report_timestamp)
+            build_dataset_report(args.dataset, suffix=args.work_suffix)
         except Exception as e:  # noqa: BLE001
             print(f"⚠ レポート自動生成に失敗しました(認識結果CSV自体は保存済みです): "
+                  f"{type(e).__name__}: {e}")
+            if args.verbose:
+                traceback.print_exc()
+
+        # マスクと文字列の紐づけを可視化した link_overlay.png を各workフォルダに作る
+        # (2026-08-30、ユーザー要望: 認識を回すたびに自動で出力してほしい)。
+        # 可視化は付随物なので、失敗しても認識結果・レポートには影響させない。
+        try:
+            from make_link_figs import build_all
+            result_dir = dataset_dir / f"reco_result{args.work_suffix}"
+            done, skipped = build_all(str(result_dir), quiet=not args.verbose)
+            print(f"✔ 紐づけ可視化 link_overlay.png -> {done} 件"
+                  + (f" (スキップ {skipped} 件)" if skipped else ""))
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠ 紐づけ可視化の生成に失敗しました(他の成果物は保存済みです): "
                   f"{type(e).__name__}: {e}")
             if args.verbose:
                 traceback.print_exc()

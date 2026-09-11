@@ -1,0 +1,9 @@
+﻿shot,query,book_name_true,display_name,book_width_mm_true,book_width_mm_pred,abs_error_mm,retry_count,elapsed_sec,error
+1__OPTI0408CSS10,OPTI0408CSS10,OPTI0408CSS10,OPTIMA,20,,,0,,Sam3ServiceError: SAM3 service unavailable at http://127.0.0.1:8765 (request feb125e7-c408-4da3-b08b-25270a773726): <urlopen error [Errno 111] Connection refused>
+1__OPTI0306CSS10,OPTI0306CSS10,OPTI0306CSS10,OPTIMA,20,,,0,,Sam3ServiceError: SAM3 service unavailable at http://127.0.0.1:8765 (request ed516a7e-a897-471c-b7b6-7f95a5e49948): <urlopen error [Errno 111] Connection refused>
+1__OPTI0204CSS10,OPTI0204CSS10,OPTI0204CSS10,OPTIMA,20,,,0,,Sam3ServiceError: SAM3 service unavailable at http://127.0.0.1:8765 (request 89b030f5-ad62-400d-9e70-5bcfbe0c5f30): <urlopen error [Errno 111] Connection refused>
+1__OPTI0153CSS10,OPTI0153CSS10,OPTI0153CSS10,OPTIMA,20,,,0,,Sam3ServiceError: SAM3 service unavailable at http://127.0.0.1:8765 (request f5d918f8-cb84-4e90-84fe-92f930e4cd15): <urlopen error [Errno 111] Connection refused>
+1__OPTI0152CSS10,OPTI0152CSS10,OPTI0152CSS10,OPTIMA,20,,,0,,Sam3ServiceError: SAM3 service unavailable at http://127.0.0.1:8765 (request 4aa950b4-97ff-4b2a-8642-8b8a889ec044): <urlopen error [Errno 111] Connection refused>
+1__10CSW01010,10CSW01010,10CSW01010,Wallaby Avenir Coil System,15.2,,,0,,Sam3ServiceError: SAM3 service unavailable at http://127.0.0.1:8765 (request ae7fc975-bc72-438e-945f-c6369c9c5ae6): <urlopen error [Errno 111] Connection refused>
+1__10CSW01515,10CSW01515,10CSW01515,Wallaby Avenir Coil System,15.2,,,0,,Sam3ServiceError: SAM3 service unavailable at http://127.0.0.1:8765 (request d97ec8f4-f130-4707-aa55-38e11789dbb3): <urlopen error [Errno 111] Connection refused>
+1__10CSW02020,10CSW02020,10CSW02020,Wallaby Avenir Coil System,15.2,,,0,,Sam3ServiceError: SAM3 service unavailable at http://127.0.0.1:8765 (request 33ce7b1e-a301-42f1-9dfd-0b00a5016a2e): <urlopen error [Errno 111] Connection refused>

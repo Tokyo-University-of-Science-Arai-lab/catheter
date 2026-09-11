@@ -7,6 +7,13 @@ from scipy.spatial.transform import Rotation
 from .robot_helper import Transform
 from .xarm7 import XArm7
 
+DEFAULT_HANDEYE_JSON_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "handeye_pairs"
+    / "handeye_T_tcp_cam_20260717_223007 copy.json"
+)
+
+
 def _mm_to_m(x_mm: float) -> float:
     return float(x_mm) * 1e-3
 
@@ -82,7 +89,7 @@ def cam_mm_to_robot_mm(
     arm: XArm7,
     p_cam_mm: np.ndarray,
     *,
-    handeye_json_path: str | Path = "/home/book/pro_book/pro_hand_book_python/xarm7/handeye_pairs/handeye_T_tcp_cam_20260717_223007 copy.json",
+    handeye_json_path: str | Path = DEFAULT_HANDEYE_JSON_PATH,
     dy_adj_mm: float = 0.0,
 ) -> np.ndarray:
     """
@@ -115,7 +122,7 @@ def get_camera_debug_info(
     arm: XArm7,
     p_cam_mm: np.ndarray,
     *,
-    handeye_json_path: str | Path = "/home/book/pro_book/pro_hand_book_python/xarm7/handeye_pairs/handeye_T_tcp_cam_20260717_223007 copy.json",
+    handeye_json_path: str | Path = DEFAULT_HANDEYE_JSON_PATH,
     dy_adj_mm: float = 0.0,
 ):
     """

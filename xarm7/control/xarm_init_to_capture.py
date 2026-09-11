@@ -3,7 +3,8 @@
 # xarm7 モジュールのパスを明示的に追加
 # ==========================
 import sys
-sys.path.append("/home/book/pro_book/pro_hand_book_python")
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 # ==========================
 # import
@@ -22,7 +23,7 @@ from xarm7.control.xarm7 import XArm7
 # 設定
 # ==========================
 # XARM_HOST = "192.168.1.208" # AC controller
-XARM_HOST = "192.168.2.197" # DC controller
+XARM_HOST = "192.168.2.221" # DC controller
 
 BASE_DIR = os.path.expanduser(
     "~/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config"

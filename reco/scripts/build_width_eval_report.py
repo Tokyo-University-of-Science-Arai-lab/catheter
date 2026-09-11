@@ -5,36 +5,36 @@ width_mm_validation.py の実行結果(reco/<dataset>/width_eval_result.csv)を�
 データセットごとに目視レビュー用のExcelと、各件のfinal.png(選択された箱をハイライトした
 画像)を集めた画像フォルダを作る。
 
-出力先(データセットごとに分離、実行日時ごとに新規フォルダ。2026-08-21、ユーザー要望:
+出力先(データセットごとに分離、実行のsuffixごとに新規フォルダ。2026-08-21、ユーザー要望:
 Excel/画像が毎回上書きされず区別できるようにするため):
-  reco/<dataset>/reco_result_<実行日時>/images/*.png
-  reco/<dataset>/reco_result_<実行日時>/catheter_width_report_<実行日時>.xlsx
+  reco/<dataset>/reco_result<suffix>/images/*.png
+  reco/<dataset>/reco_result<suffix>/catheter_width_report<suffix>.xlsx
+  reco/<dataset>/reco_result<suffix>/work/<各認識ケース>/...
 
-Excelと画像フォルダは同じreco_result_<実行日時>/の直下にまとめる(2026-08-21、
+Excelと画像フォルダは同じreco_result<suffix>/の直下にまとめる(2026-08-21、
 ユーザー要望: 「Excelと画像が別フォルダに分かれているのはNG、1つのフォルダに
-まとめてほしい」)。認識処理自体の作業フォルダwidth_eval_work<suffix>/はこの
-レポート生成の出力先とは別物で、入力データの読み取り元としてのみ使う(変更なし)。
+まとめてほしい」)。
 
-reco_result_<実行日時>/work は width_eval_work<suffix>/ へのシンボリックリンク
-(2026-08-21、ユーザー要望: 「各アイテムの個別認識情報(final.png以外にocr_result.json・
-debug_*等)にもreco_result側からアクセスしたい」)。width_eval_work<suffix>/は
-stand-100だけで4GB超あり、レポート生成のたびに実体コピーすると容量が急増するため、
-シンボリックリンクで参照する形にした(実体コピーではない)。
+【2026-08-25変更】以前はwidth_mm_validation.pyの作業フォルダwidth_eval_work<suffix>/
+とこのレポート出力先reco_result_<別のタイムスタンプ>/が別物で、reco_result側の"work"は
+width_eval_work<suffix>/へのシンボリックリンクだった。ユーザー要望(「width_eval_work
+フォルダは不要、reco_result内に入れてほしい」)により、width_mm_validation.py側が
+最初からreco_result<suffix>/work/を直接の作業フォルダとして使うように変更したため、
+このスクリプトはもう別フォルダのシンボリックリンクを作らない(work/は最初からそこにある)。
+suffixもwidth_mm_validation.py実行時の1つのタイムスタンプに統一した(以前はCSV/work用の
+suffixと、レポート生成時刻report_timestampの2つのタイムスタンプが混在していた)。
 
 実行:
-    cd ~/pro_book/pro_hand_book_python
-    .pro_hand_book_fixed/bin/python3.10 reco/scripts/build_width_eval_report.py
-    .pro_hand_book_fixed/bin/python3.10 reco/scripts/build_width_eval_report.py --suffix _rotfix
+    python3 reco/scripts/build_width_eval_report.py
+    python3 reco/scripts/build_width_eval_report.py --suffix _20260825_195856
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import json
-import os
 import re
 import shutil
-import time
 from pathlib import Path
 
 import cv2
@@ -58,19 +58,39 @@ ANNOTATIONS_JSON = {
 # 存在する方を優先順に試す。
 SELECTED_MASK_FILENAMES = ["selected_mask_refined.png", "final_mask.png", "selected_mask_raw.png"]
 
+# キー別スコア列の並び。multikey_matcher.pyのkey_namesと同じ(ref/display_name/date/
+# spec_1/spec_2)。過去の実行(2026-08-25のSPEC_1/SPEC_2導入前、by_keyが3〜4キーしか
+# 無い・キー名が違う("color")場合がある)はget()で欠損させ空欄にする(2026-08-25、
+# ユーザー要望: 「全クエリのキーとクエリごとのscoreを書くようにしてほしい」
+# 「REFの認識でも一対一対応はしているか」を目視確認できるようにするため)。
+KEY_SCORE_COLUMNS = [
+    ("REFスコア", "ref"),
+    ("display_nameスコア", "display_name"),
+    ("日付スコア", "date"),
+    ("spec_1スコア", "spec_1"),
+    ("spec_2スコア", "spec_2"),
+]
+
 HEADERS = [
-    "認識した順番", "画像ファイル", "shot", "query(book_name)", "display_name",
+    "認識した順番", "query(book_name)", "display_name",
     "目視確認(T/F)", "IoU一致度",
     "正解幅mm", "推定幅mm", "誤差mm", "2mm以内(把持成功目安)", "リトライ回数",
-    "識別スコア", "識別margin", "識別確信度(confident)", "認識した文字列",
+    *[h for h, _ in KEY_SCORE_COLUMNS],
+    "勝ったキー", "識別margin", "識別確信度(confident)",
+    "独立選択(一対一対応無し)", "一対一対応で選択変化",
+    "認識した文字列",
     "処理時間sec", "メモ", "エラー",
 ]
 COLUMN_WIDTHS = {
-    "認識した順番": 12, "画像ファイル": 42, "shot": 20, "query(book_name)": 16,
+    "認識した順番": 12, "query(book_name)": 16,
     "display_name": 26, "目視確認(T/F)": 14, "IoU一致度": 12,
     "正解幅mm": 10, "推定幅mm": 10, "誤差mm": 10,
-    "2mm以内(把持成功目安)": 18, "リトライ回数": 12, "識別スコア": 12, "識別margin": 12,
-    "識別確信度(confident)": 16, "認識した文字列": 40, "処理時間sec": 12,
+    "2mm以内(把持成功目安)": 18, "リトライ回数": 12,
+    **{h: 12 for h, _ in KEY_SCORE_COLUMNS},
+    "勝ったキー": 14, "識別margin": 12,
+    "識別確信度(confident)": 16,
+    "独立選択(一対一対応無し)": 20, "一対一対応で選択変化": 18,
+    "認識した文字列": 40, "処理時間sec": 12,
     "メモ": 24, "エラー": 20,
 }
 
@@ -121,24 +141,45 @@ def resolve_work_dir(base_dir: Path, dataset: str, shot: str, display_name: str 
     解決されてしまい、Excelの識別スコア以降の列が20件ずつ同じ値になっていた
     (ユーザー報告により発覚)。display_nameのsafe_name化した値まで完全一致させる
     ことで、1件ずつ正しく一意なフォルダに解決するよう修正した。
+
+    【2026-08-25 再発・修正】display_nameが複数品目で重複する場合(例:
+    master_catheter_2.jsonは5品目とも display_name="OPTIMA")、上記の
+    display_name一致だけでは再び複数候補が一致してしまい、同じ症状(final.pngが
+    見つからない等)が再発した。width_mm_validation.py側でフォルダ名にbook_name
+    (query、マスタのキーなので必ず一意)を付けるよう修正したので、まずそちらの
+    新形式(`{処理順}-{image_id}-{display_name}-{book_name}`)で一意に探し、
+    見つからなければ旧形式(book_name無し)にフォールバックする。
     """
     direct = base_dir / shot
     if direct.exists():
         return direct
-    if dataset == "stand-100" and "__" in shot and display_name:
-        image_id = shot.split("__", 1)[0]
-        expected = f"{image_id}-{safe_name(display_name)}"
-        pattern = re.compile(rf"^\d+-{re.escape(expected)}$")
-        matches = [
-            cand for cand in (sorted(base_dir.iterdir()) if base_dir.exists() else [])
-            if cand.is_dir() and pattern.match(cand.name)
-        ]
+    # diagonal-40だけ1画像=1品目固定の特別扱い。それ以外(stand-100・新規データセットとも)は
+    # width_mm_validation.pyのis_cross_modeと同じ「画像×マスタ全品目」方式のフォルダ名なので、
+    # 同じ判定で探索する(2026-08-25、ユーザー要望: データセット名を"stand-100"に限定せず一般化)。
+    is_cross_mode = dataset != "diagonal-40"
+    if is_cross_mode and "__" in shot:
+        image_id, book_name = shot.split("__", 1)
+        candidates = sorted(base_dir.iterdir()) if base_dir.exists() else []
+
+        bn = safe_name(book_name)
+        pattern_new = re.compile(rf"^\d+-{re.escape(image_id)}-.+-{re.escape(bn)}$")
+        matches = [c for c in candidates if c.is_dir() and pattern_new.match(c.name)]
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
-            print(f"⚠ resolve_work_dir: shot={shot} display_name={display_name!r} に対して"
-                  f"複数候補が一致し一意に決まりません: {[m.name for m in matches]}")
-    elif dataset == "diagonal-40":
+            print(f"⚠ resolve_work_dir: shot={shot} book_name={book_name!r} に対して"
+                  f"複数候補が一致し一意に決まりません(新形式): {[m.name for m in matches]}")
+
+        if display_name:
+            expected = f"{image_id}-{safe_name(display_name)}"
+            pattern_old = re.compile(rf"^\d+-{re.escape(expected)}$")
+            matches = [c for c in candidates if c.is_dir() and pattern_old.match(c.name)]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                print(f"⚠ resolve_work_dir: shot={shot} display_name={display_name!r} に対して"
+                      f"複数候補が一致し一意に決まりません(旧形式): {[m.name for m in matches]}")
+    elif not is_cross_mode:
         expected = safe_name(shot)
         pattern = re.compile(rf"^\d+-{re.escape(expected)}$")
         matches = [
@@ -169,6 +210,16 @@ def recognized_text_for_selected_mask(debug: dict) -> str:
         if m.get("mask") == selected_mask:
             return m.get("text", "")
     return ""
+
+
+def by_key_scores_for_selected_mask(debug: dict) -> dict:
+    """選択マスクの、5キー(ref/display_name/date/spec_1/spec_2)それぞれの生スコアを返す。
+    古い実行(SPEC_1/SPEC_2導入前)はキーが無い/違う場合があるので、無ければ空のまま。"""
+    selected_mask = debug.get("selected_mask")
+    for m in debug.get("per_mask", []):
+        if m.get("mask") == selected_mask:
+            return m.get("by_key", {})
+    return {}
 
 
 def decode_uncompressed_rle(counts: list[int], height: int, width: int) -> np.ndarray:
@@ -214,8 +265,12 @@ def load_gt_masks_by_image(dataset: str) -> dict[str, list[np.ndarray]]:
     対応するかの正解ラベル付けは無いため、識別の正誤とは独立に「セグメンテーション
     そのものの幾何精度」を見る指標として算出する)。
     """
-    ann_path = ANNOTATIONS_JSON.get(dataset)
-    if not ann_path or not ann_path.exists():
+    # 既知の2データセットは専用パス(stand-100はannotations統合版のファイル名が
+    # 異なるため個別指定)。それ以外の新規データセットは、reco/<dataset>/annotations/
+    # instances_default.json という共通の置き場所を既定として探す(2026-08-25、
+    # ユーザー要望: 新規データセットでもIoUを計算したい)。
+    ann_path = ANNOTATIONS_JSON.get(dataset) or (RECO_ROOT / dataset / "annotations" / "instances_default.json")
+    if not ann_path.exists():
         return {}
     try:
         d = json.loads(ann_path.read_text(encoding="utf-8"))
@@ -226,6 +281,16 @@ def load_gt_masks_by_image(dataset: str) -> dict[str, list[np.ndarray]]:
     anns_by_image_id: dict[int, list] = {}
     for ann in d.get("annotations", []):
         anns_by_image_id.setdefault(ann["image_id"], []).append(ann)
+
+    # stand-100/diagonal-40は、annotations/(images/*.png)がdepth_shots側と180度向きが
+    # 異なる旧来の撮影・アノテーション手順で作られている(2026-08-21、ユーザー確認済み:
+    # depth_shotsが本来正しい向きで、annotations側の方を回転させる必要がある。実測でも
+    # 無回転だと最良IoUが0.357、180度回転後は0.882まで跳ね上がることを確認済み)。
+    # 2026-08-25、ユーザー確認: 新しいcapture_anno.pyはimages/とdepth_shots/を同一フレーム
+    # から同時に保存するため回転関係が無く、新規データセット(OPTIMA-No1・OPTIMA-2等、
+    # 今後作るものも含む)では回転してはいけない。この2データセットだけ回転する。
+    NEEDS_180_ROTATION = {"stand-100", "diagonal-40"}
+    needs_rotation = dataset in NEEDS_180_ROTATION
 
     result: dict[str, list[np.ndarray]] = {}
     for image_id, img in images_by_id.items():
@@ -241,11 +306,8 @@ def load_gt_masks_by_image(dataset: str) -> dict[str, list[np.ndarray]]:
                 continue
             try:
                 mask = segmentation_to_mask(seg, h, w)
-                # annotations/(images/*.png)はdepth_shots側と180度向きが異なる
-                # (2026-08-21、ユーザー確認済み: depth_shotsが本来正しい向きで、
-                # annotations側の方を回転させる必要がある。実測でも無回転だと
-                # 最良IoUが0.357、180度回転後は0.882まで跳ね上がることを確認済み)。
-                mask = np.rot90(mask, 2)
+                if needs_rotation:
+                    mask = np.rot90(mask, 2)
                 masks.append(mask)
             except NotImplementedError as e:
                 print(f"⚠ GTアノテーション(id={ann.get('id')})のIoU算出をスキップ: {e}")
@@ -254,7 +316,7 @@ def load_gt_masks_by_image(dataset: str) -> dict[str, list[np.ndarray]]:
 
 
 def gt_image_key_for_shot(dataset: str, shot: str) -> str:
-    if dataset == "stand-100" and "__" in shot:
+    if dataset != "diagonal-40" and "__" in shot:
         return shot.split("__", 1)[0]
     return shot
 
@@ -293,18 +355,58 @@ def best_iou_for_row(dataset: str, shot: str, work_dir: Path,
     return max(ious) if ious else None
 
 
-def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str = "") -> None:
-    """suffixを指定すると、入力データは width_eval_result{suffix}.csv /
-    width_eval_work{suffix}/ から読む(2026-08-21、回転バグ修正版=_rotfixを反映する際に追加)。
+def add_summary_sheet(wb: Workbook, data_sheet_name: str) -> None:
+    """先頭に「集計」シートを追加し、選択率・誤選択率・誤差2mm未満率を数式で出す。
 
-    xlsxと画像は両方とも reco_result_{report_timestamp}/ の直下にまとまって入る
-    (xlsx本体とimages/サブフォルダ)。実行のたびに新しいフォルダ・ファイル名になり、
-    Excel・画像とも上書きされない(2026-08-21、ユーザー要望:
-    「Excelファイルが毎回上書きされるのは困る」「画像が入るフォルダ名の区別もつきにくい」
-    への対応)。認識処理の作業フォルダwidth_eval_work{suffix}/は入力データの読み取り元
-    としてのみ使う。reco_result_{report_timestamp}/work はこのwidth_eval_work{suffix}/への
-    シンボリックリンク(2026-08-21、ユーザー要望: 「個別アイテムの詳細情報にも
-    reco_result側からアクセスしたい」。実体コピーだと容量が急増するためリンクにした)。
+    2026-09-11、ユーザー要望: 「Excelの集計が終わるたびに選択率と誤差2mm未満率を
+    計算してもらうのは面倒」とのことで、build_dataset_report()の出力に毎回自動で
+    含めるようにした。列全体(D:D, I:I等)を参照する数式にしてあるので、目視確認
+    (T/F)を後から追記・修正しても開き直せば自動で再計算される。
+    """
+    if "集計" in wb.sheetnames:
+        del wb["集計"]
+    ws = wb.create_sheet("集計", 0)
+
+    src = f"'{data_sheet_name}'!"
+    total_col = get_column_letter(HEADERS.index("query(book_name)") + 1)
+    review_col = get_column_letter(HEADERS.index("目視確認(T/F)") + 1)
+    within2mm_col = get_column_letter(HEADERS.index("2mm以内(把持成功目安)") + 1)
+    total_expr = f"(COUNTA({src}{total_col}:{total_col})-1)"
+
+    rows = [
+        ("項目", "値", "内訳"),
+        ("総件数", f"={total_expr}", ""),
+        ("選択率(目視確認T)", f'=COUNTIF({src}{review_col}:{review_col},"T")/{total_expr}',
+         f'=COUNTIF({src}{review_col}:{review_col},"T")&"/"&{total_expr}'),
+        ("誤選択率(目視確認F)", f'=COUNTIF({src}{review_col}:{review_col},"F")/{total_expr}',
+         f'=COUNTIF({src}{review_col}:{review_col},"F")&"/"&{total_expr}'),
+        ("誤差2mm未満率", f'=COUNTIF({src}{within2mm_col}:{within2mm_col},"○")/{total_expr}',
+         f'=COUNTIF({src}{within2mm_col}:{within2mm_col},"○")&"/"&{total_expr}'),
+    ]
+    for r_idx, row in enumerate(rows, start=1):
+        for c_idx, val in enumerate(row, start=1):
+            cell = ws.cell(row=r_idx, column=c_idx, value=val)
+            if r_idx == 1:
+                cell.font = Font(bold=True)
+    for r in range(3, 6):
+        ws.cell(row=r, column=2).number_format = "0.0%"
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 14
+    ws.column_dimensions["C"].width = 14
+
+
+def build_dataset_report(dataset: str, suffix: str = "") -> None:
+    """suffixを指定すると、入力データは width_eval_result{suffix}.csv /
+    reco_result{suffix}/work/ から読む(2026-08-21、回転バグ修正版=_rotfixを反映する際に追加。
+    2026-08-25、work_root自体をreco_result{suffix}/work/に変更したのに合わせて更新)。
+
+    xlsxと画像とwork/は全て reco_result{suffix}/ の直下にまとまって入る
+    (2026-08-21、ユーザー要望: 「Excelファイルが毎回上書きされるのは困る」
+    「画像が入るフォルダ名の区別もつきにくい」への対応。2026-08-25、ユーザー要望:
+    「width_eval_workフォルダは不要、reco_result内に入れてほしい」)。
+    width_mm_validation.py が最初からreco_result{suffix}/work/を作業フォルダとして
+    使うため、このスクリプトはそこにあるwork/をそのまま読むだけで、シンボリックリンクは
+    作らない(以前はwidth_eval_work{suffix}/という別フォルダへのリンクだった)。
     """
     csv_path = RECO_ROOT / dataset / f"width_eval_result{suffix}.csv"
     if not csv_path.exists():
@@ -320,17 +422,11 @@ def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str =
         r["_proc_order"] = i + 1
     rows.sort(key=lambda r: r["shot"])
 
-    out_dir = RECO_ROOT / dataset / f"reco_result_{report_timestamp}"
-    work_base_dir = RECO_ROOT / dataset / f"width_eval_work{suffix}"
+    out_dir = RECO_ROOT / dataset / f"reco_result{suffix}"
+    work_base_dir = out_dir / "work"
     images_dir = out_dir / "images"
-    xlsx_path = out_dir / f"catheter_width_report_{report_timestamp}.xlsx"
+    xlsx_path = out_dir / f"catheter_width_report{suffix}.xlsx"
     images_dir.mkdir(parents=True, exist_ok=True)
-
-    work_link = out_dir / "work"
-    if work_base_dir.exists() and not work_link.exists():
-        work_link.symlink_to(
-            Path(os.path.relpath(work_base_dir, out_dir)), target_is_directory=True
-        )
 
     gt_masks_by_image = load_gt_masks_by_image(dataset)
 
@@ -339,9 +435,13 @@ def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str =
         work_dir = resolve_work_dir(work_base_dir, dataset, shot, r.get("display_name", ""))
         debug = load_multikey_debug(work_dir)
         r["_selected_score"] = debug.get("selected_score")
+        r["_winning_key"] = debug.get("winning_key", "")
         r["_margin"] = debug.get("margin")
         r["_confident"] = debug.get("confident")
+        r["_independent_selected_mask"] = debug.get("independent_selected_mask")
+        r["_hungarian_changed"] = debug.get("hungarian_changed_selection")
         r["_recognized_text"] = recognized_text_for_selected_mask(debug)
+        r["_by_key"] = by_key_scores_for_selected_mask(debug)
         r["_iou"] = best_iou_for_row(dataset, shot, work_dir, gt_masks_by_image)
 
         img_filename = image_filename_for(dataset, shot, r.get("display_name", ""), work_dir.name)
@@ -373,8 +473,6 @@ def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str =
         err_mm = to_float(r.get("abs_error_mm"))
         ws.append([
             r["_proc_order"],
-            r["_image_filename"],
-            r["shot"],
             r.get("query", ""),
             r.get("display_name", ""),
             "",
@@ -384,9 +482,12 @@ def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str =
             err_mm,
             ("○" if err_mm is not None and err_mm <= 2.0 else ("" if err_mm is None else "×")),
             to_float(r.get("retry_count")),
-            to_float(r["_selected_score"]),
+            *[to_float(r["_by_key"].get(key)) for _, key in KEY_SCORE_COLUMNS],
+            r["_winning_key"],
             to_float(r["_margin"]),
             ("" if r["_confident"] is None else str(r["_confident"])),
+            (r["_independent_selected_mask"] or ""),
+            ("" if r["_hungarian_changed"] is None else str(r["_hungarian_changed"])),
             r["_recognized_text"],
             to_float(r.get("elapsed_sec")),
             "",
@@ -413,6 +514,8 @@ def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str =
             elif err_cell.value >= 10.0:
                 err_cell.fill = PatternFill(start_color="FCE4E4", end_color="FCE4E4", fill_type="solid")
 
+    add_summary_sheet(wb, ws.title)
+
     wb.save(xlsx_path)
     print(f"✔ [{dataset}] Excel -> {xlsx_path} ({len(rows)}行)")
     print(f"✔ [{dataset}] 画像 -> {images_dir} ({len(list(images_dir.glob('*.png')))}枚)")
@@ -420,13 +523,18 @@ def build_dataset_report(dataset: str, suffix: str = "", report_timestamp: str =
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--dataset", default=None,
+                    help="reco/<dataset>/ のレポートだけを作る(例: 新規に追加したデータセット名)。"
+                         "省略時は従来通りDATASETS(stand-100, diagonal-40)を両方処理する"
+                         "(2026-08-25、ユーザー要望: データセット名を固定2種に限定せず"
+                         "一般化してほしい)。")
     ap.add_argument("--suffix", default="",
                     help="入力データの接尾辞(例: _rotfix、width_mm_validation.pyの"
                          "--work-suffixに対応)。")
     args = ap.parse_args()
-    report_timestamp = time.strftime("%Y%m%d_%H%M%S")
-    for dataset in DATASETS:
-        build_dataset_report(dataset, suffix=args.suffix, report_timestamp=report_timestamp)
+    targets = [args.dataset] if args.dataset else DATASETS
+    for dataset in targets:
+        build_dataset_report(dataset, suffix=args.suffix)
 
 
 if __name__ == "__main__":
