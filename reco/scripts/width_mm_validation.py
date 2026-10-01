@@ -128,7 +128,7 @@ sys.path.insert(0, str(REPO_ROOT))
 # reco/master_catheter_reco.jsonは"参照・閲覧用"の複製(reco/README.md参照)で、
 # SPEC_1/SPEC_2追加(2026-08-25)がここには反映されておらず古いまま(color_rgbが残存)
 # だったため、これをデフォルトにすると識別照合が古いマスタ相当に劣化してしまう。
-DEFAULT_MASTER_JSON = REPO_ROOT / "catheter-100" / "master_catheter_20260216.json"
+DEFAULT_MASTER_JSON = REPO_ROOT / "Master_JSON" / "master_catheter_20260216.json"
 
 # diagonal-40/depth_shots/<name> のフォルダ名(末尾の _L/_R を除いた品目部分) ->
 # マスタJSONのbook_name(multikey_matcherのqueryとして渡すキー)。

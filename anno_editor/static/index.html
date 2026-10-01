@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>アノテーション編集</title>
+<style>
+  :root { --bg:#1e1f22; --panel:#2b2d31; --line:#3f4147; --fg:#e6e6e6; --dim:#9aa0a6; --acc:#4c8dff; --warn:#e5a50a; --bad:#e5534b; }
+  * { box-sizing:border-box; }
+  body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--fg);
+         font:13px/1.45 "Noto Sans CJK JP","Yu Gothic UI",sans-serif; overflow:hidden; }
+  #side { width:300px; flex:none; background:var(--panel); border-right:1px solid var(--line);
+          display:flex; flex-direction:column; overflow:hidden; }
+  #side section { padding:10px 12px; border-bottom:1px solid var(--line); }
+  #side h2 { font-size:12px; color:var(--dim); margin:0 0 6px; font-weight:600; }
+  select, input[type=text], button { font:inherit; color:var(--fg); background:#1f2023; border:1px solid var(--line);
+          border-radius:4px; padding:4px 6px; }
+  select, input[type=text] { width:100%; margin-bottom:6px; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.primary { background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600; }
+  .row { display:flex; gap:6px; align-items:center; }
+  .row > * { flex:1; }
+  #imgList, #annList { overflow:auto; flex:1; min-height:60px; }
+  .item { padding:3px 12px; cursor:pointer; display:flex; justify-content:space-between; gap:8px; white-space:nowrap; }
+  .item:hover { background:#34363c; }
+  .item.cur { background:#3a4a6b; }
+  .item .n { color:var(--dim); }
+  .tag { font-size:11px; padding:0 5px; border-radius:3px; background:#444; color:#ddd; }
+  .tag.rle { background:#5b4a16; }
+  .tag.occ { background:#5b2b2b; }
+  #main { flex:1; position:relative; }
+  canvas { display:block; width:100%; height:100%; }
+  #status { position:absolute; left:0; right:0; bottom:0; padding:4px 10px; background:rgba(0,0,0,.6);
+            font-size:12px; color:#ccc; display:flex; gap:16px; }
+  #status .dirty { color:var(--warn); font-weight:600; }
+  #banner { position:absolute; top:8px; left:50%; transform:translateX(-50%); background:var(--warn); color:#000;
+            padding:4px 10px; border-radius:4px; display:none; font-weight:600; }
+  #toast { position:absolute; top:8px; right:10px; background:#2e7d32; color:#fff; padding:6px 10px; border-radius:4px;
+           display:none; max-width:420px; }
+  #toast.err { background:var(--bad); }
+  details { color:var(--dim); font-size:12px; }
+  details kbd { background:#1f2023; border:1px solid var(--line); border-radius:3px; padding:0 4px; color:var(--fg); }
+  details table { border-collapse:collapse; } details td { padding:1px 6px 1px 0; vertical-align:top; }
+  label.chk { display:flex; gap:6px; align-items:center; color:var(--dim); }
+  label.chk input { width:auto; margin:0; }
+</style>
+</head>
+<body>
+<div id="side">
+  <section>
+    <h2>データセット</h2>
+    <select id="dsSel"></select>
+    <select id="fileSel"></select>
+    <h2>保存先 (annotations/ 内)</h2>
+    <input type="text" id="saveName">
+    <div class="row"><button class="primary" id="saveBtn">保存 (Ctrl+S)</button></div>
+  </section>
+  <section>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="rotChk">画像を180°回転表示</label>
+    </div>
+    <div class="row" style="margin-top:4px">
+      <label class="chk" style="flex:none">塗り</label><input type="range" id="alpha" min="0" max="80" value="25">
+    </div>
+  </section>
+  <section style="padding-bottom:4px"><h2>画像</h2></section>
+  <div id="imgList"></div>
+  <section style="padding-bottom:4px;border-top:1px solid var(--line)"><h2>この画像の領域</h2></section>
+  <div id="annList"></div>
+  <section>
+    <details>
+      <summary>操作方法</summary>
+      <table>
+        <tr><td>クリック</td><td>領域を選択</td></tr>
+        <tr><td>頂点ドラッグ</td><td>頂点を移動</td></tr>
+        <tr><td>辺の□をドラッグ</td><td>頂点を追加</td></tr>
+        <tr><td>右クリック(頂点)</td><td>頂点を削除</td></tr>
+        <tr><td>選択中の内側ドラッグ</td><td>領域ごと移動</td></tr>
+        <tr><td>空白ドラッグ / ホイール</td><td>移動 / 拡大縮小</td></tr>
+        <tr><td><kbd>N</kbd></td><td>新規作成（クリックで点、<kbd>Enter</kbd>か始点クリックで確定、<kbd>Esc</kbd>取消、<kbd>BS</kbd>1点戻す）</td></tr>
+        <tr><td><kbd>Del</kbd></td><td>選択中の領域を削除</td></tr>
+        <tr><td><kbd>O</kbd></td><td>occluded 切替</td></tr>
+        <tr><td><kbd>Tab</kbd></td><td>次の領域を選択</td></tr>
+        <tr><td><kbd>←</kbd><kbd>→</kbd></td><td>前 / 次の画像</td></tr>
+        <tr><td><kbd>F</kbd></td><td>全体表示</td></tr>
+        <tr><td><kbd>H</kbd></td><td>アノテーション表示の切替</td></tr>
+        <tr><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd></td><td>元に戻す / やり直し</td></tr>
+      </table>
+    </details>
+  </section>
+</div>
+<div id="main">
+  <canvas id="cv"></canvas>
+  <div id="banner"></div>
+  <div id="toast"></div>
+  <div id="status"></div>
+</div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+const HANDLE = 5, HIT = 8;
+
+let datasets = [], dsId = null, fileName = null;
+let raw = null, images = [], anns = [];
+let imgIdx = 0, imgEl = null, sel = -1;
+let view = { s: 1, x: 0, y: 0 };
+let undoStack = [], redoStack = [], dirty = false;
+let drawing = null;            // 新規作成中の点列 [[x,y],...]
+let drag = null;               // {type:'vertex'|'move'|'pan', ...}
+let mouse = { x: 0, y: 0 };    // 画像座標
+let hideAnn = false;
+
+// ------------------------------------------------------------ util
+function toast(msg, err) {
+  const t = $("toast"); t.textContent = msg; t.className = err ? "err" : ""; t.style.display = "block";
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = "none", err ? 6000 : 2500);
+}
+async function api(path, opt) {
+  const r = await fetch(path, opt); const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText); return j;
+}
+const curImg = () => images[imgIdx];
+const rotated = () => $("rotChk").checked;
+function imgToScreen(x, y) { return [x * view.s + view.x, y * view.s + view.y]; }
+function screenToImg(sx, sy) { return [(sx - view.x) / view.s, (sy - view.y) / view.s]; }
+function annsOfCur() { const id = curImg()?.id; return anns.map((a, i) => i).filter(i => anns[i].image_id === id); }
+function pts(a) { const p = a._polys[0] || []; const r = []; for (let i = 0; i < p.length; i += 2) r.push([p[i], p[i + 1]]); return r; }
+function setPts(a, list) { a._polys[0] = list.flat(); a._edited = true; }
+function inPoly(x, y, ps) {
+  let c = false;
+  for (let i = 0, j = ps.length - 1; i < ps.length; j = i++) {
+    const [xi, yi] = ps[i], [xj, yj] = ps[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+function polyArea(ps) { let s = 0; for (let i = 0, j = ps.length - 1; i < ps.length; j = i++) s += ps[j][0] * ps[i][1] - ps[i][0] * ps[j][1]; return Math.abs(s / 2); }
+function markDirty(v = true) { dirty = v; renderStatus(); }
+
+// ------------------------------------------------------------ undo
+function snapshot() { undoStack.push(JSON.stringify(anns)); if (undoStack.length > 200) undoStack.shift(); redoStack = []; }
+function undo() { if (!undoStack.length) return; redoStack.push(JSON.stringify(anns)); anns = JSON.parse(undoStack.pop()); fixSel(); markDirty(); refresh(); }
+function redo() { if (!redoStack.length) return; undoStack.push(JSON.stringify(anns)); anns = JSON.parse(redoStack.pop()); fixSel(); markDirty(); refresh(); }
+function fixSel() { if (sel >= anns.length || (sel >= 0 && anns[sel].image_id !== curImg()?.id)) sel = -1; }
+
+// ------------------------------------------------------------ load
+async function loadDatasets() {
+  datasets = await api("/api/datasets");
+  $("dsSel").innerHTML = datasets.map(d => `<option>${d.id}</option>`).join("");
+  let prev = null; try { prev = JSON.parse(localStorage.getItem("annoEditor.last") || "null"); } catch (e) {}
+  const d = datasets.find(d => d.id === prev?.ds) || datasets[0];
+  if (!d) { toast("annotations/ を持つデータセットが見つかりません", true); return; }
+  $("dsSel").value = d.id; fillFiles(d, prev?.file); await loadFile();
+}
+function fillFiles(d, want) {
+  $("fileSel").innerHTML = d.files.map(f => `<option>${f}</option>`).join("");
+  const pick = d.files.includes(want) ? want : (d.files.find(f => f.endsWith("_auto.json")) || d.files[0]);
+  $("fileSel").value = pick;
+}
+function confirmDiscard() { return !dirty || confirm("保存していない変更があります。破棄しますか？"); }
+
+async function loadFile() {
+  dsId = $("dsSel").value; fileName = $("fileSel").value;
+  try { localStorage.setItem("annoEditor.last", JSON.stringify({ ds: dsId, file: fileName })); } catch (e) {}
+  const j = await api(`/api/load?ds=${encodeURIComponent(dsId)}&file=${encodeURIComponent(fileName)}`);
+  raw = j.raw; images = j.images; anns = j.annotations;
+  undoStack = []; redoStack = []; sel = -1; drawing = null; markDirty(false);
+  $("saveName").value = fileName.endsWith("_auto.json") ? "instances_default.json" : fileName;
+  const missing = images.filter(im => !im.found).length;
+  if (missing) toast(`画像が見つからないものが ${missing} 枚あります`, true);
+  await showImage(0);
+}
+async function showImage(i) {
+  if (!images.length) { imgEl = null; refresh(); return; }
+  imgIdx = Math.max(0, Math.min(images.length - 1, i)); sel = -1; drawing = null;
+  const im = curImg();
+  const fromDepth = im.origin === "depth_shots";
+  $("banner").style.display = fromDepth || !im.found ? "block" : "none";
+  $("banner").textContent = !im.found ? `画像が見つかりません: ${im.file_name}`
+    : "images/ に無いため depth_shots の画像で代用中。向きが合わなければ「180°回転表示」を切り替えてください";
+  imgEl = null;
+  if (im.found) {
+    imgEl = await new Promise((res, rej) => {
+      const e = new Image(); e.onload = () => res(e); e.onerror = rej;
+      e.src = `/api/image?ds=${encodeURIComponent(dsId)}&name=${encodeURIComponent(im.file_name)}`;
+    }).catch(() => null);
+  }
+  fit(); refresh();
+}
+
+// ------------------------------------------------------------ save
+async function saveFile() {
+  const name = $("saveName").value.trim();
+  if (!/^[^/\\.][^/\\]*\.json$/.test(name)) { toast("保存先は annotations/ 内の .json ファイル名にしてください", true); return; }
+  try {
+    const r = await api("/api/save", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ds: dsId, file: name, raw, annotations: anns }) });
+    markDirty(false);
+    toast(`保存しました: ${r.saved}（${r.count}件）` + (r.backup ? `\n旧ファイルは ${r.backup} に退避` : ""));
+    const d = datasets.find(d => d.id === dsId);
+    if (d && !d.files.includes(name)) { d.files.push(name); d.files.sort(); const cur = $("fileSel").value; fillFiles(d, cur); }
+  } catch (e) { toast("保存に失敗: " + e.message, true); }
+}
+
+// ------------------------------------------------------------ view
+function resize() { const r = cv.parentElement.getBoundingClientRect(); cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio; draw(); }
+function fit() {
+  const im = curImg(); if (!im) return;
+  const W = cv.width / devicePixelRatio, H = cv.height / devicePixelRatio - 24;
+  view.s = Math.min(W / im.width, H / im.height) * 0.98;
+  view.x = (W - im.width * view.s) / 2; view.y = (H - im.height * view.s) / 2;
+}
+function colorOf(i) { return `hsl(${(i * 67) % 360} 85% 58%)`; }
+
+function draw() {
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.fillStyle = "#111"; ctx.fillRect(0, 0, cv.width, cv.height);
+  const im = curImg(); if (!im) return;
+  ctx.save(); ctx.translate(view.x, view.y); ctx.scale(view.s, view.s);
+  if (imgEl) {
+    if (rotated()) { ctx.save(); ctx.translate(im.width, im.height); ctx.rotate(Math.PI); ctx.drawImage(imgEl, 0, 0, im.width, im.height); ctx.restore(); }
+    else ctx.drawImage(imgEl, 0, 0, im.width, im.height);
+  } else { ctx.fillStyle = "#333"; ctx.fillRect(0, 0, im.width, im.height); }
+  ctx.restore();
+  if (hideAnn && !drawing) return;
+  const alpha = $("alpha").value / 100;
+  const list = annsOfCur();
+  for (const i of list) {
+    if (hideAnn) break;
+    const a = anns[i], ps = pts(a); if (ps.length < 2) continue;
+    const c = colorOf(i), isSel = i === sel;
+    ctx.beginPath(); ps.forEach(([x, y], k) => { const [sx, sy] = imgToScreen(x, y); k ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); }); ctx.closePath();
+    ctx.globalAlpha = isSel ? Math.min(alpha + 0.15, 1) : alpha; ctx.fillStyle = c; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.lineWidth = isSel ? 2.5 : 1.5; ctx.strokeStyle = isSel ? "#fff" : c;
+    if (a.attributes?.occluded) ctx.setLineDash([6, 4]);
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (sel >= 0 && !hideAnn) {
+    const ps = pts(anns[sel]);
+    ps.forEach(([x, y], k) => {             // 辺の中点ハンドル(□)
+      const [x2, y2] = ps[(k + 1) % ps.length], [sx, sy] = imgToScreen((x + x2) / 2, (y + y2) / 2);
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.strokeRect(sx - 3, sy - 3, 6, 6);
+    });
+    ps.forEach(([x, y]) => {                // 頂点(●)
+      const [sx, sy] = imgToScreen(x, y);
+      ctx.beginPath(); ctx.arc(sx, sy, HANDLE, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.strokeStyle = "#000"; ctx.lineWidth = 1; ctx.stroke();
+    });
+  }
+  if (drawing) {
+    ctx.beginPath();
+    drawing.forEach(([x, y], k) => { const [sx, sy] = imgToScreen(x, y); k ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+    const [mx, my] = imgToScreen(mouse.x, mouse.y); ctx.lineTo(mx, my);
+    ctx.strokeStyle = "#ffeb3b"; ctx.lineWidth = 2; ctx.stroke();
+    drawing.forEach(([x, y], k) => { const [sx, sy] = imgToScreen(x, y); ctx.beginPath(); ctx.arc(sx, sy, k ? 3.5 : 6, 0, Math.PI * 2); ctx.fillStyle = "#ffeb3b"; ctx.fill(); });
+  }
+}
+
+// ------------------------------------------------------------ side lists / status
+function renderLists() {
+  $("imgList").innerHTML = images.map((im, i) => {
+    const n = anns.filter(a => a.image_id === im.id).length;
+    return `<div class="item ${i === imgIdx ? "cur" : ""}" data-i="${i}"><span>${im.file_name}${im.found ? "" : " ⚠"}</span><span class="n">${n}</span></div>`;
+  }).join("");
+  $("annList").innerHTML = annsOfCur().map((i, k) => {
+    const a = anns[i], ps = pts(a);
+    const tags = (a._rle && !a._edited ? '<span class="tag rle">RLE</span> ' : "") + (a.attributes?.occluded ? '<span class="tag occ">occ</span> ' : "") + (a._edited ? '<span class="tag">編集</span>' : "");
+    return `<div class="item ${i === sel ? "cur" : ""}" data-a="${i}"><span><span style="color:${colorOf(i)}">■</span> #${k + 1}　${ps.length}点 ${tags}</span><span class="n">${Math.round(polyArea(ps))}</span></div>`;
+  }).join("");
+  $("imgList").querySelector(".cur")?.scrollIntoView({ block: "nearest" });
+  $("annList").querySelector(".cur")?.scrollIntoView({ block: "nearest" });
+}
+function renderStatus() {
+  const im = curImg();
+  $("status").innerHTML = [
+    dirty ? '<span class="dirty">● 未保存</span>' : "保存済み",
+    im ? `${imgIdx + 1}/${images.length} ${im.file_name}` : "",
+    `x ${mouse.x.toFixed(0)}, y ${mouse.y.toFixed(0)}`,
+    `${Math.round(view.s * 100)}%`,
+    drawing ? "新規作成中: クリックで点を追加 / Enter で確定 / Esc で取消" : "",
+  ].join("　");
+}
+function refresh() { renderLists(); renderStatus(); draw(); }
+
+// ------------------------------------------------------------ hit test
+function hitVertex(sx, sy) {
+  if (sel < 0) return -1; const ps = pts(anns[sel]);
+  for (let k = 0; k < ps.length; k++) { const [x, y] = imgToScreen(...ps[k]); if (Math.hypot(x - sx, y - sy) <= HIT) return k; }
+  return -1;
+}
+function hitMid(sx, sy) {
+  if (sel < 0) return -1; const ps = pts(anns[sel]);
+  for (let k = 0; k < ps.length; k++) {
+    const [x1, y1] = ps[k], [x2, y2] = ps[(k + 1) % ps.length], [x, y] = imgToScreen((x1 + x2) / 2, (y1 + y2) / 2);
+    if (Math.hypot(x - sx, y - sy) <= HIT) return k;
+  }
+  return -1;
+}
+function hitAnn(ix, iy) {  // 重なっていれば面積の小さい方を優先
+  let best = -1, bestA = Infinity;
+  for (const i of annsOfCur()) { const ps = pts(anns[i]); if (ps.length >= 3 && inPoly(ix, iy, ps)) { const A = polyArea(ps); if (A < bestA) { best = i; bestA = A; } } }
+  return best;
+}
+
+// ------------------------------------------------------------ mouse
+function evPos(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+cv.addEventListener("contextmenu", e => e.preventDefault());
+cv.addEventListener("mousedown", e => {
+  const [sx, sy] = evPos(e), [ix, iy] = screenToImg(sx, sy);
+  if (e.button === 1) { drag = { type: "pan", sx, sy, vx: view.x, vy: view.y }; return; }
+  if (drawing) {
+    if (e.button !== 0) return;
+    if (drawing.length >= 3) { const [fx, fy] = imgToScreen(...drawing[0]); if (Math.hypot(fx - sx, fy - sy) <= HIT) { finishDrawing(); return; } }
+    drawing.push([ix, iy]); draw(); return;
+  }
+  if (e.button === 2) {                       // 右クリックで頂点削除
+    const k = hitVertex(sx, sy);
+    if (k >= 0) { const ps = pts(anns[sel]); if (ps.length <= 3) { toast("3点未満にはできません。領域ごと消すには Del", true); return; }
+      snapshot(); ps.splice(k, 1); setPts(anns[sel], ps); markDirty(); refresh(); }
+    return;
+  }
+  if (e.button !== 0) return;
+  let k = hitVertex(sx, sy);
+  if (k >= 0) { snapshot(); drag = { type: "vertex", k }; return; }
+  k = hitMid(sx, sy);
+  if (k >= 0) { snapshot(); const ps = pts(anns[sel]); ps.splice(k + 1, 0, [ix, iy]); setPts(anns[sel], ps); drag = { type: "vertex", k: k + 1 }; markDirty(); refresh(); return; }
+  const h = hitAnn(ix, iy);
+  if (h >= 0) {
+    if (h === sel) { snapshot(); drag = { type: "move", ix, iy, orig: pts(anns[sel]), moved: false }; }
+    else { sel = h; refresh(); }
+    return;
+  }
+  sel = -1; refresh();
+  drag = { type: "pan", sx, sy, vx: view.x, vy: view.y };
+});
+window.addEventListener("mousemove", e => {
+  const [sx, sy] = evPos(e); [mouse.x, mouse.y] = screenToImg(sx, sy);
+  if (!drag) { if (drawing) draw(); renderStatus(); updateCursor(sx, sy); return; }
+  if (drag.type === "pan") { view.x = drag.vx + sx - drag.sx; view.y = drag.vy + sy - drag.sy; draw(); return; }
+  const im = curImg(), clamp = (v, m) => Math.max(0, Math.min(m, v));
+  if (drag.type === "vertex") {
+    const ps = pts(anns[sel]); ps[drag.k] = [clamp(mouse.x, im.width), clamp(mouse.y, im.height)]; setPts(anns[sel], ps); markDirty(); draw();
+  } else if (drag.type === "move") {
+    const dx = mouse.x - drag.ix, dy = mouse.y - drag.iy; drag.moved = true;
+    setPts(anns[sel], drag.orig.map(([x, y]) => [x + dx, y + dy])); markDirty(); draw();
+  }
+});
+window.addEventListener("mouseup", () => {
+  if (drag && drag.type === "move" && !drag.moved) undoStack.pop();  // クリックだけなら履歴に残さない
+  if (drag && drag.type !== "pan") renderLists();
+  drag = null;
+});
+function updateCursor(sx, sy) {
+  cv.style.cursor = drawing ? "crosshair" : hitVertex(sx, sy) >= 0 || hitMid(sx, sy) >= 0 ? "pointer"
+    : (sel >= 0 && hitAnn(...screenToImg(sx, sy)) === sel) ? "move" : "default";
+}
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  const [sx, sy] = evPos(e), f = Math.exp(-e.deltaY * 0.0015), ns = Math.max(0.05, Math.min(40, view.s * f));
+  view.x = sx - (sx - view.x) * ns / view.s; view.y = sy - (sy - view.y) * ns / view.s; view.s = ns; draw(); renderStatus();
+}, { passive: false });
+
+// ------------------------------------------------------------ edit ops
+function finishDrawing() {
+  if (!drawing || drawing.length < 3) { toast("3点以上必要です", true); return; }
+  snapshot();
+  const cat = raw.categories?.[0]?.id ?? 1;
+  const id = anns.reduce((m, a) => Math.max(m, a.id || 0), 0) + 1;
+  anns.push({ id, image_id: curImg().id, category_id: cat, segmentation: [], area: 0, bbox: [0, 0, 0, 0], iscrowd: 0,
+              attributes: { occluded: false }, _rle: false, _edited: true, _polys: [drawing.flat()] });
+  sel = anns.length - 1; drawing = null; markDirty(); refresh();
+}
+function deleteSel() { if (sel < 0) return; snapshot(); anns.splice(sel, 1); sel = -1; markDirty(); refresh(); }
+function toggleOcc() {
+  if (sel < 0) return; snapshot(); const a = anns[sel];
+  a.attributes = { ...(a.attributes || {}), occluded: !a.attributes?.occluded }; markDirty(); refresh();
+}
+
+// ------------------------------------------------------------ keys
+window.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" && e.target.type === "text") { if (e.key === "Enter") e.target.blur(); return; }
+  if (e.target.tagName === "SELECT") return;
+  const k = e.key, ctrl = e.ctrlKey || e.metaKey;
+  if (ctrl && k.toLowerCase() === "s") { e.preventDefault(); saveFile(); return; }
+  if (ctrl && k.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (ctrl && k.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
+  if (drawing) {
+    if (k === "Enter") finishDrawing();
+    else if (k === "Escape") { drawing = null; refresh(); }
+    else if (k === "Backspace") { drawing.pop(); if (!drawing.length) drawing = null; refresh(); }
+    e.preventDefault(); return;
+  }
+  if (k === "n" || k === "N") { sel = -1; drawing = []; refresh(); }
+  else if (k === "Delete" || k === "Backspace") { e.preventDefault(); deleteSel(); }
+  else if (k === "o" || k === "O") toggleOcc();
+  else if (k === "ArrowRight" || k === "d") showImage(imgIdx + 1);
+  else if (k === "ArrowLeft" || k === "a") showImage(imgIdx - 1);
+  else if (k === "Tab") { e.preventDefault(); const l = annsOfCur(); if (l.length) { const p = l.indexOf(sel); sel = l[(p + (e.shiftKey ? -1 : 1) + l.length) % l.length]; refresh(); } }
+  else if (k === "Escape") { sel = -1; refresh(); }
+  else if (k === "f" || k === "F") { fit(); draw(); renderStatus(); }
+  else if (k === "h" || k === "H") { hideAnn = !hideAnn; draw(); }
+});
+
+// ------------------------------------------------------------ side events
+$("imgList").addEventListener("click", e => { const it = e.target.closest(".item"); if (it) showImage(+it.dataset.i); });
+$("annList").addEventListener("click", e => { const it = e.target.closest(".item"); if (it) { sel = +it.dataset.a; refresh(); } });
+$("dsSel").addEventListener("change", async e => {
+  if (!confirmDiscard()) { e.target.value = dsId; return; }
+  fillFiles(datasets.find(d => d.id === e.target.value)); await loadFile();
+});
+$("fileSel").addEventListener("change", async e => {
+  if (!confirmDiscard()) { e.target.value = fileName; return; }
+  await loadFile();
+});
+$("saveBtn").addEventListener("click", saveFile);
+$("rotChk").addEventListener("change", draw);
+$("alpha").addEventListener("input", draw);
+window.addEventListener("resize", resize);
+window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+resize();
+loadDatasets().catch(e => toast(e.message, true));
+</script>
+</body>
+</html>

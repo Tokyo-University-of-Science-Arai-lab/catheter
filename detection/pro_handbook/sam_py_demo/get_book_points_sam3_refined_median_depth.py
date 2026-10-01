@@ -520,6 +520,12 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
         )
 
     started = time.perf_counter()
+    # 2026-09-15、ユーザー要望: 推論時間の内訳（マッチング/マスク補正/深度PCA等）を
+    # フェーズごとに計測して残す。区間の開始/終了は、既存の処理の呼び出し直前・
+    # 直後にtime.perf_counter()を挟むだけで、処理の中身自体は変えていない。
+    timings: dict[str, float] = {}
+
+    t_setup = time.perf_counter()
     shot_dir = Path(shot_dir).expanduser().resolve()
     color_np, depth_raw = _load_offline_rgbd(shot_dir)
     if prepared is not None:
@@ -529,7 +535,9 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
             depth_scale = prepared["depth_scale"]
     if intr is None or depth_scale is None:
         intr, depth_scale = stable._intrinsics()
+    timings["setup_seconds"] = time.perf_counter() - t_setup
 
+    t_query_independent = time.perf_counter()
     if prepared is None:
         masks, sam_data = _run_query_independent_stage(
             shot_dir=shot_dir,
@@ -543,6 +551,11 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
         )
     else:
         masks, sam_data = _reuse_prepared_shot(prepared, shot_dir)
+    # SAM3推論とOCRはこの区間の中で並行実行される(_run_query_independent_stage参照)。
+    # 個別の内訳はsam3_service_inference.json/ocr_runtime_info.jsonに既に記録されている。
+    timings["sam3_and_ocr_seconds"] = time.perf_counter() - t_query_independent
+
+    t_matching = time.perf_counter()
     merged = current.merge_ocr_and_masks(
         query=query, masks=masks, shot_dir=shot_dir, interactive=False, threshold=40,
         master_json=master_json,
@@ -554,11 +567,16 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
     selected_index = int(merged["sel_idx"])
     raw_mask = np.asarray(merged["mask01"], bool)
     score = float(sam_data[selected_index - 1]["score"])
+    timings["ocr_mask_matching_seconds"] = time.perf_counter() - t_matching
+
+    t_geometry = time.perf_counter()
     polygon, ocr_info = _selected_ocr_geometry(
         raw_mask, merged, color_np.shape[:2], shot_dir, query
     )
+    timings["ocr_geometry_seconds"] = time.perf_counter() - t_geometry
 
     use_refinement = mode in {"refine_only", "refine_and_median_flatten"}
+    t_refinement = time.perf_counter()
     refined, refinement, metrics = refine_selected_sam3_mask(
         raw_mask,
         ocr_polygon=polygon,
@@ -567,6 +585,7 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
         output_dir=shot_dir,
         mode=mode,
     )
+    timings["mask_refinement_seconds"] = time.perf_counter() - t_refinement
     used_mask = refined if use_refinement else raw_mask.copy()
     if not use_refinement:
         refinement["mode"] = mode
@@ -598,6 +617,7 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
         cv2.imwrite(str(shot_dir / "selected_mask_refined_overlay.png"), overlay)
         _write_json(shot_dir / "mask_refinement_result.json", refinement)
 
+    t_depth_pca = time.perf_counter()
     labels_count, labels = cv2.connectedComponents(
         raw_mask.astype(np.uint8), connectivity=8
     )
@@ -615,6 +635,7 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
         depth_scale=float(depth_scale),
         depth_merge_tolerance_raw=depth_merge_tolerance_raw,
     )
+    timings["depth_pca_width_seconds"] = time.perf_counter() - t_depth_pca
     ocr_result = json.loads((shot_dir / "ocr_result.json").read_text(encoding="utf-8"))
     selected_ocr = (ocr_info.get("selected_ocr_polygon") or {}).get("text")
     result = {
@@ -639,6 +660,7 @@ def run_capture_and_pca_offline_sam3_refined_median_depth(
         "mask_refinement": refinement,
         **{key: value for key, value in compute.items() if key != "final_depth"},
         "processing_seconds": float(time.perf_counter() - started),
+        "timings": timings,
         "prepared_shot_reused": prepared is not None,
         "returned_shot_dir": str(shot_dir),
     }

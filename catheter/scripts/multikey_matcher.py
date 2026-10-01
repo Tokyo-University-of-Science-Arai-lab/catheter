@@ -72,7 +72,7 @@ except Exception:  # scipy が無い環境では貪欲法にフォールバッ�
 
 # マスタJSON。呼び出し時に master_json= で上書きできる。
 DEFAULT_MASTER_JSON = (
-    Path(__file__).resolve().parents[2] / "catheter-100" / "master_catheter_20260216.json"
+    Path(__file__).resolve().parents[2] / "Master_JSON" / "master_catheter_20260216.json"
 )
 
 # 低信頼のOCR断片はゴミ文字になりやすいので落とす
@@ -94,6 +94,44 @@ LEGACY_MODE = os.environ.get("MULTIKEY_LEGACY", "") == "1"
 # 有効時は「全キーの生スコアが0の組み合わせ」を割当候補から外し、根拠が無い品目を
 # 押し込まないようにする。既定は無効で、無指定なら挙動は一切変わらない。
 DROP_ZERO_ASSIGN = os.environ.get("MULTIKEY_DROP_ZERO", "") == "1"
+
+# しきい値未満の対応を「該当なし」として棄却する（比較実験用）:
+# 環境変数 MULTIKEY_REJECT_LOW_SCORE=1 で有効。
+# ハンガリー法は行列の形状で挙動が変わる: マスク数がマスタ品目数より多いと、
+# マスタの全品目が必ずどれかのマスクへ割り当てられる。逆にマスタの方が多いと、
+# 割当から漏れた品目は「割当」節の独立argmaxフォールバックがスコアを問わず
+# 強制的に拾ってしまう。どちらの場合も「マスタに載っているが棚に無い品目」や
+# 「棚にはあるがマスタに載っていない品目」を無理やり対応付けてしまう
+# (2026-09-24、指導教員からの指摘: 一対一対応は「マスタの全品目が画像に
+# 写っている」前提でないと成立しない)。有効時は、assignの構築直後と
+# 独立argmaxフォールバックの両方で、しきい値(呼び出し時のthreshold引数)未満の
+# ペアを除外し、該当する対応が無ければ「見つからない」を返せるようにする。
+# 注意: スコアSは raw_sum なら5キー合計(最大500点)で、既定のthreshold=40は
+# 0〜100点尺度の名残のためほぼ効かない(reco/0911で選択マスクS<40は201件中2件、
+# どちらもS=0)。実際に使うときは呼び出し側でthresholdを尺度に合わせて渡すこと。
+# 既定は無効で、無指定なら挙動は一切変わらない。
+REJECT_LOW_SCORE = os.environ.get("MULTIKEY_REJECT_LOW_SCORE", "") == "1"
+
+# 足切りに使うスコアの種類: 環境変数 MULTIKEY_REJECT_RULE (既定"sum")。
+# 2026-09-26にreco/0911で検証した結果、5キー合計(S)は「映っていない品目」を見分けられない
+# ことが分かった(該当なしにしたい18件の合計S中央値271に対し、映っている正解106件の中央値
+# 324で大差が無い。原因はSPEC_1/SPEC_2が「単位が読めない数値」へ80点を与える等でどの箱にも
+# 点が出やすいこと)。識別力があるのはref/display_nameの2キーだけで、この2つの合計だけで
+# 判定する方が、正解を落とす数に対して該当なし/誤選択を除ける数がはるかに多かった
+# (reco/0911原因調査/しきい値足切り分析_20260926/状況1と状況2_結果まとめ.md 参照)。
+#   "sum"             : 5キー合計S(既存、raw_sumなら最大500点)で判定
+#   "ref_display_name": ref+display_nameの合計(最大200点)で判定(2026-09-29追加)
+REJECT_RULE = os.environ.get("MULTIKEY_REJECT_RULE", "sum").strip()
+if REJECT_RULE not in ("sum", "ref_display_name"):
+    raise ValueError(f"MULTIKEY_REJECT_RULEはsum/ref_display_nameのいずれかにしてください: {REJECT_RULE!r}")
+
+# 該当なし足切りのしきい値を、コードを変えずに指定する: 環境変数 MULTIKEY_REJECT_THRESHOLD=200 等
+# (2026-09-26追加、ユーザー承認)。REJECT_LOW_SCORE=1のときだけ意味を持つ。未指定なら、
+# ルールごとの既定値を使う: "sum"は呼び出し側から渡されるthreshold引数(既定40、0〜100点
+# 尺度の名残でほぼ効かない)、"ref_display_name"は100.0(上記の検証で選んだ値)。
+_REJECT_THRESHOLD_ENV = os.environ.get("MULTIKEY_REJECT_THRESHOLD", "").strip()
+REJECT_THRESHOLD = float(_REJECT_THRESHOLD_ENV) if _REJECT_THRESHOLD_ENV else None
+REJECT_RULE_DEFAULT_THRESHOLD = {"sum": None, "ref_display_name": 100.0}  # sum は呼び出し時のthreshold引数を使う
 
 # 「確信あり」の判定。
 # 2026-08-25まではscore>=70 and margin>=20(margin=最高スコアと2位の差)だけで
@@ -441,6 +479,7 @@ def _greedy_assign(S: np.ndarray) -> dict[int, int]:
 def _save_assignment_overview(
     shot_dir: Path,
     rgb_path: Path,
+    masks: list,
     boxes: list[dict | None],
     mask_to_item: dict[int, dict],
     out_filename: str = "ocr_overlay_all_assignments.png",
@@ -455,8 +494,15 @@ def _save_assignment_overview(
     作ってそこへ品目名の一覧を載せる(画像に直接ラベルを重ねると、隣接する
     棚の箱同士でラベルが重なって読めなくなるため)。
 
+    2026-09-29修正(ユーザー要望): 矩形の枠線ではなく、sam3_all_masks_overlay.png
+    と同じく実際のマスク形状(画素単位)を半透明で塗りつぶす方式に変更した。
+    軸並行bbox(boxes)だと、斜めや不整形なマスクの実際の輪郭が分からないため。
+    色分け(クエリ=赤、各品目=パレット色)は維持し、割当の無いマスクは塗らずに
+    輪郭線だけ描く(従来のbbox枠と同じ「未割当=薄い印」という役割だが、実マスクの
+    輪郭に変えた)。
+
+    masks: match_text_to_mask_main に渡された生のマスク一覧(boxesと同じ並び)。
     mask_to_item: {mask_index(0始まり): {"book_name", "is_query", "score"}}
-    割当が無い(mask_to_item に無い)マスクは灰色の枠のみ描画する。
     """
     try:
         img = cv2.imread(str(rgb_path))
@@ -464,6 +510,7 @@ def _save_assignment_overview(
             return
         h, w = img.shape[:2]
         rotated = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+        overlay = rotated.copy()
 
         # (0,0,255)の赤はQUERY専用色として予約するため、通常品目のパレットには含めない。
         palette = [
@@ -476,7 +523,7 @@ def _save_assignment_overview(
             # _unrotate_poly(angle=90)の逆変換(元画像座標->OCR処理向き座標)。
             return int((h - 1) - y), int(x)
 
-        rows = []  # (i, item, rx1, ry1, rx2, ry2) 回転後の軸並行bboxを描画順に集める
+        rows = []  # (i, item, rx1, ry1, rx2, ry2) 番号ラベルの位置・一覧の並び順に使う
         for i, box in enumerate(boxes):
             if box is None:
                 continue
@@ -487,17 +534,31 @@ def _save_assignment_overview(
             xs = [c[0] for c in corners]
             ys = [c[1] for c in corners]
             rx1, ry1, rx2, ry2 = min(xs), min(ys), max(xs), max(ys)
+
+            # 実マスクを、背景画像と同じ向き(rotate90CW)に揃えてから使う。
+            mask_bin = _mask_to_binary(masks[i], h, w)
+            mask_rot = cv2.rotate(mask_bin, cv2.ROTATE_90_CLOCKWISE).astype(bool)
+
             item = mask_to_item.get(i)
             if item is None:
-                cv2.rectangle(rotated, (rx1, ry1), (rx2, ry2), (120, 120, 120), 1)
+                # 未割当: 塗りつぶさず、マスクの輪郭線だけ描く。
+                contours, _ = cv2.findContours(
+                    mask_rot.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                )
+                cv2.drawContours(overlay, contours, -1, (120, 120, 120), 1)
                 continue
             color = (0, 0, 255) if item["is_query"] else palette[i % len(palette)]
-            thickness = 4 if item["is_query"] else 2
-            cv2.rectangle(rotated, (rx1, ry1), (rx2, ry2), color, thickness)
+            alpha = 0.5
+            overlay[mask_rot] = (
+                (1 - alpha) * overlay[mask_rot].astype(np.float32)
+                + alpha * np.asarray(color, dtype=np.float32)
+            ).astype(np.uint8)
             # マスク番号だけは画像上にも小さく振っておく(余白側の一覧と対応付けるため)。
-            cv2.putText(rotated, str(i + 1), (rx1 + 4, ry1 + 20), cv2.FONT_HERSHEY_SIMPLEX,
+            # 位置はbboxの左上を使う(塗りは実マスク形状、ラベル位置だけbbox基準で従来通り)。
+            cv2.putText(overlay, str(i + 1), (rx1 + 4, ry1 + 20), cv2.FONT_HERSHEY_SIMPLEX,
                         0.6, color, 2, cv2.LINE_AA)
             rows.append((i, item, rx1, ry1, rx2, ry2))
+        rotated = overlay
 
         # 余白パネル(右側)に品目一覧を書く。画像上の並び順(x座標=元画像の上下方向)に揃える。
         rows.sort(key=lambda t: t[2])
@@ -541,6 +602,7 @@ def _save_perkey_overlay(
     keys_of_target: list[tuple[str, str, bool]],
     out_filename: str = "ocr_overlay_perkey_top1.png",
     panel_label: str = "selected(top1)",
+    mask=None,
 ) -> None:
     """指定マスク(sel_mask_name)に帰属するOCR検出のうち、キーごとに最もスコアが高かった
     1件だけを切り出して可視化する（multikey_match_debug.jsonの数値だけでは
@@ -549,6 +611,12 @@ def _save_perkey_overlay(
     out_filenameを変えることで、採用マスク(top1)だけでなく次点マスク(top2)にも
     流用できる(2026-08-26試験導入: 全体最適割当(ハンガリー法)が正しく機能しているか
     ―採用されなかったマスクのOCRが本当に別品目のものかを目視で確認したいとの要望)。
+
+    mask: sel_mask_nameの実マスク(画素配列、maskはimgと同じ元画像の向き)。渡すと、
+    検出文字列のボックスだけでなく、その文字列が帰属しているマスクの輪郭も黄色線で
+    重ねて描く(2026-09-29追加、ユーザー要望: 「文字列boxだけでなく、文字列が帰属される
+    マスクも載せてほしい」。マスクが複数の箱にまたがって融合していないか等の確認に使う)。
+    Noneなら従来通りマスクの輪郭は描かない。
     """
     try:
         with open(ocr_json_path, "r", encoding="utf-8") as f:
@@ -600,6 +668,17 @@ def _save_perkey_overlay(
         scale = 3
         crop = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
 
+        if mask is not None:
+            mask_bin = _mask_to_binary(mask, h, w)
+            mask_crop = mask_bin[cy1:cy2, cx1:cx2]
+            if mask_crop.size:
+                mask_crop = cv2.resize(mask_crop, (crop.shape[1], crop.shape[0]),
+                                        interpolation=cv2.INTER_NEAREST)
+                contours, _ = cv2.findContours(
+                    mask_crop.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                )
+                cv2.drawContours(crop, contours, -1, (0, 255, 255), 4)  # 黄色=帰属先マスクの輪郭
+
         for i, (kname, _score, _a) in enumerate(winners, start=1):
             if kname not in boxes_px:
                 continue
@@ -613,7 +692,10 @@ def _save_perkey_overlay(
 
         legend_h = 34 * (len(winners) + 1) + 20
         panel = np.zeros((legend_h, crop.shape[1], 3), dtype=np.uint8)
-        cv2.putText(panel, f"mask={sel_mask_name} [{panel_label}]  (per-key top-1 OCR match)", (14, 26),
+        title = f"mask={sel_mask_name} [{panel_label}]  (per-key top-1 OCR match)"
+        if mask is not None:
+            title += "  / yellow outline = mask shape"
+        cv2.putText(panel, title, (14, 26),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2, cv2.LINE_AA)
         y0 = 60
         for i, (kname, score, a) in enumerate(winners, start=1):
@@ -633,6 +715,125 @@ def _save_perkey_overlay(
         print(f"[multikey] per-keyオーバーレイの保存に失敗（処理は継続）: {e}")
 
 
+def _save_black_placeholder(path: Path, size: tuple[int, int] = (900, 500)) -> None:
+    """対応付けされなかった品目のうち、足切りしなければ選ばれていたはずのマスクが
+    分からない場合の最終手段としての真っ暗な画像(2026-09-29追加。2026-09-30、
+    通常は_save_would_be_overlayに置き換えたので、それも失敗した場合のみ使う)。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(path), np.zeros((size[1], size[0], 3), dtype=np.uint8))
+
+
+def _save_would_be_overlay(path: Path, rgb_path: Path, mask, would_be_mask_name: str,
+                            would_be_score: float | None) -> bool:
+    """該当なし(足切り)になった品目について、足切りしなければ選ばれていたはずの
+    マスクを灰色で塗りつぶした画像を書き出す(2026-09-30追加、ユーザー要望:
+    「該当なしとされても、足切りしなければ選ぶはずのマスクがあるはず。それが分かる
+    ようにしてほしい」)。_save_perkey_overlayと同じくマスク周辺を拡大して見せる。
+    成功したらTrue、失敗(マスクの面積が0等)したらFalseを返す(呼び出し側で
+    _save_black_placeholderにフォールバックするため)。
+    """
+    try:
+        img = cv2.imread(str(rgb_path))
+        if img is None:
+            return False
+        h, w = img.shape[:2]
+        mask_bin = _mask_to_binary(mask, h, w)
+        box = _mask_bbox(mask_bin)
+        if box is None:
+            return False
+
+        margin = 60
+        cx1, cy1 = max(0, int(box["x1"] - margin)), max(0, int(box["y1"] - margin))
+        cx2, cy2 = min(w, int(box["x2"] + margin)), min(h, int(box["y2"] + margin))
+        crop = img[cy1:cy2, cx1:cx2].copy()
+        if crop.size == 0:
+            return False
+        scale = 3
+        crop = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+        mask_crop = mask_bin[cy1:cy2, cx1:cx2]
+        mask_crop = cv2.resize(mask_crop, (crop.shape[1], crop.shape[0]),
+                                interpolation=cv2.INTER_NEAREST).astype(bool)
+        gray = np.array([150, 150, 150], dtype=np.float32)
+        alpha = 0.55
+        crop[mask_crop] = (
+            (1 - alpha) * crop[mask_crop].astype(np.float32) + alpha * gray
+        ).astype(np.uint8)
+        contours, _ = cv2.findContours(mask_crop.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(crop, contours, -1, (0, 0, 255), 4)
+
+        panel = np.zeros((70, crop.shape[1], 3), dtype=np.uint8)
+        score_txt = f"score={would_be_score:.1f}(しきい値未満で該当なし)" if would_be_score is not None else "score=?"
+        cv2.putText(panel, f"該当なし - 足切りしなければ選ばれていたマスク: {would_be_mask_name}  {score_txt}",
+                    (14, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
+        out = np.vstack([crop, panel])
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(path), out)
+        return True
+    except Exception as e:
+        print(f"[multikey] would-beオーバーレイの保存に失敗（処理は継続）: {e}")
+        return False
+
+
+def _save_all_perkey_overlays(
+    shot_dir: Path,
+    rgb_path: Path,
+    ocr_json_path: Path,
+    ocr_debug: list[dict],
+    all_assignments: list[dict],
+    master: list[dict],
+    masks: list,
+    images_dirname: str = "images",
+) -> None:
+    """マスタの全品目について、選択マスクを強調した画像を images/<品目名>.png として
+    書き出す(2026-09-29追加、ユーザー要望)。
+
+    ocr_overlay_all_assignments.png(全品目を1枚に詰め込む図)は「どれがどれだか分からない」
+    との指摘を受け、_save_perkey_overlayと同じ形式(該当箇所を拡大＋キーごとの凡例)の画像を
+    品目ごとに1枚ずつ作れるようにした。masksを渡すことで、検出文字列のボックスに加え、
+    帰属先マスクの輪郭(黄色)も重ねて描く。
+
+    対応付けされなかった品目は、足切りしなければ選ばれていたはずのマスク(all_assignmentsの
+    would_be_mask)を灰色で塗りつぶした画像にする(2026-09-30追加、ユーザー要望)。
+    would_be_maskが無い(そもそも候補マスクが無い等)場合のみ、従来通り真っ暗な画像にする。
+    """
+    images_dir = shot_dir / images_dirname
+    images_dir.mkdir(parents=True, exist_ok=True)
+    for a, m in zip(all_assignments, master):
+        name = a["book_name"] or a["display_name"] or "item"
+        filename = f"{_safe_name(name)}.png"
+        out_path = images_dir / filename
+        if a["assigned_mask"] is None:
+            ok = False
+            would_name = a.get("would_be_mask")
+            if would_name:
+                would_idx = int(would_name.rsplit("_", 1)[1]) - 1
+                if 0 <= would_idx < len(masks):
+                    ok = _save_would_be_overlay(
+                        out_path, rgb_path, masks[would_idx], would_name, a.get("would_be_score")
+                    )
+            if not ok:
+                _save_black_placeholder(out_path)
+            continue
+        mask_idx = int(a["assigned_mask"].rsplit("_", 1)[1]) - 1
+        _save_perkey_overlay(
+            shot_dir=images_dir,
+            rgb_path=rgb_path,
+            ocr_json_path=ocr_json_path,
+            ocr_debug=ocr_debug,
+            sel_mask_name=a["assigned_mask"],
+            keys_of_target=_keys_of(m),
+            out_filename=filename,
+            panel_label=name,
+            mask=masks[mask_idx] if 0 <= mask_idx < len(masks) else None,
+        )
+        if not out_path.exists():
+            # 該当OCRが見つからない等でこの関数が黙って書き出さないことがある。
+            # 品目ごとに必ず1枚出すため、その場合も真っ暗な画像で埋める。
+            _save_black_placeholder(out_path)
+
+
 # ===== 本番互換の入口 =====
 
 def match_text_to_mask_main(
@@ -645,6 +846,7 @@ def match_text_to_mask_main(
     use_hungarian: bool | None = None,
     use_multikey: bool | None = None,
     save_all_assignments: bool = False,
+    save_all_perkey_overlays: bool = False,
 ) -> list[dict[str, Any]]:
     """
     本番 only_one_tilted.match_text_to_mask_main と同じ入出力。
@@ -661,6 +863,13 @@ def match_text_to_mask_main(
     選べているか」を一望で目視確認したいとの要望に対応。既定はFalse
     (数値情報はmultikey_match_debug.jsonのall_assignmentsに常に出力するので、
     画像無しでも確認可能)。
+
+    save_all_perkey_overlays: Trueにすると、マスタの全品目について、
+    shot_dir/images/<品目名>.png を1枚ずつ書き出す(2026-09-29追加)。
+    ocr_overlay_all_assignments.pngは1枚に全品目を詰め込むため「どれがどれだか
+    分からない」との指摘を受け、_save_perkey_overlayと同じ形式(選択箇所の拡大＋
+    キーごとの凡例)を品目ごとに分けた。対応付けされなかった品目は真っ暗な画像になる。
+    既定はFalse。
     """
     shot_dir = Path(shot_dir)
     ocr_json_path = shot_dir / "ocr_result.json"
@@ -738,6 +947,14 @@ def match_text_to_mask_main(
             S = np.where(no_evidence, -1.0e6, S)
             print(f"[multikey] 根拠ゼロの組み合わせ {int(no_evidence.sum())} 件を割当候補から除外")
 
+    # 該当なし足切りに使うスコア行列(REJECT_RULE定義部のコメント参照)。
+    # 割当(assign)自体はSで解くが、「該当なしにするかどうか」の判定だけは別の
+    # 指標を使えるようにする。既定の"sum"はSそのもの。
+    if REJECT_RULE == "ref_display_name":
+        reject_S = per_key[:, :, 0] + per_key[:, :, 1]
+    else:
+        reject_S = S
+
     # ===== 割当 =====
     if use_hungarian and n_mask > 0 and n_master > 0:
         if _HAS_SCIPY:
@@ -750,9 +967,46 @@ def match_text_to_mask_main(
         assign = {target_j: int(S[:, target_j].argmax())} if n_mask else {}
         method = "independent"
 
+    # 2026-09-24試験導入: しきい値未満の対応を「該当なし」として除外する。
+    # REJECT_LOW_SCORE定義部のコメント参照。all_assignments(全品目一括対応表)も
+    # このassignを直接参照しているので、ここで除外すれば両方に反映される。
+    # 除外前に「どの品目が割当を受けていたか」を控えておく(下のフォールバック判定用)。
+    # 値(マスク番号)も含めて丸ごと控える(pre_reject_assign)。該当なしになった品目について
+    # 「足切りしなければ選ばれていたはずのマスク」をall_assignmentsに残すのに使う
+    # (2026-09-30追加、ユーザー要望)。
+    assigned_before_reject = set(assign)
+    pre_reject_assign = dict(assign)
+    # 足切りに使う値: 環境変数MULTIKEY_REJECT_THRESHOLDがあればそれ、無ければ
+    # REJECT_RULEごとの既定値(sumはthreshold引数、ref_display_nameは100.0)。
+    reject_th = REJECT_THRESHOLD
+    if reject_th is None:
+        reject_th = REJECT_RULE_DEFAULT_THRESHOLD[REJECT_RULE]
+        if reject_th is None:
+            reject_th = threshold
+    if REJECT_LOW_SCORE and n_mask and n_master:
+        before = len(assign)
+        assign = {j: i for j, i in assign.items() if float(reject_S[i, j]) >= reject_th}
+        dropped = before - len(assign)
+        if dropped:
+            print(f"[multikey] {REJECT_RULE}のしきい値{reject_th}未満の対応 {dropped} 件を除外(該当なし扱い)")
+
     sel_i = assign.get(target_j)
     if sel_i is None and n_mask:
-        sel_i = int(S[:, target_j].argmax())
+        # 2026-09-25修正: 「割当は受けたがしきい値未満で除外された」品目は、独立argmaxへ
+        # 切り替えず該当なしのままにする。argmaxのマスクは、ハンガリー法が他の品目へ
+        # 意図的に譲ったマスクなので、そこへ切り替えると、reco/0911の実データ
+        # (正解136件)でしきい値200のとき9件が別マスクへ差し替わり誤選択になり得る
+        # ことが分かった(切り替えず該当なしにすれば該当なしは10件、差し替えは0件)。
+        # 独立argmaxを使うのは、ハンガリー法がそもそも割当を与えなかった品目
+        # (マスタ品目数>マスク数のとき、割当から漏れる)だけに限る。
+        rejected_by_threshold = REJECT_LOW_SCORE and target_j in assigned_before_reject
+        if not rejected_by_threshold:
+            candidate = int(S[:, target_j].argmax())
+            # REJECT_LOW_SCORE有効時は、このフォールバックにも同じしきい値を適用する。
+            # 満たさなければsel_iはNoneのまま(=「この商品は棚に見当たらない」)。
+            # resultsが空になり、既存のTargetMaskSelectionErrorへ落ちる。
+            if not REJECT_LOW_SCORE or float(reject_S[candidate, target_j]) >= reject_th:
+                sel_i = candidate
 
     # 全体最適割当(ハンガリー法)の効果を検証するため、他品目との競合を無視して
     # このqueryだけで見た場合にどのマスクが最高スコアだったか(independent)も
@@ -792,6 +1046,13 @@ def match_text_to_mask_main(
         ref_score = 0.0
         support_scores = {"display_name": 0.0, "date": 0.0, "spec_1": 0.0, "spec_2": 0.0}
         support_count = 0
+        # 2026-09-29修正: sel_i=None(該当なし)でも、per_mask debug出力はcolを使えるように
+        # raw_colを定義しておく。未定義のままだと下のデバッグ保存がNameErrorで丸ごと失敗し、
+        # 「なぜ該当なしになったか」を確認したい該当なしのケースに限ってdebug jsonが
+        # 保存されないという、一番困る形の欠陥になっていた(REJECT_RULE=ref_display_nameの
+        # 動作確認中に発見)。win_key="none"なのでキー別の生スコアではなく、col(=Sの列、
+        # 割当に使った合成スコア)をそのまま流用する。
+        raw_col = col
     selected_text = combined[sel_i] if sel_i is not None else ""
     text_plausible = _looks_like_plausible_identifier(selected_text)
 
@@ -832,12 +1093,46 @@ def match_text_to_mask_main(
     for j, m in enumerate(master):
         i = assign.get(j)
         if i is None:
+            # 2026-09-30追加(ユーザー要望): 該当なしでも「足切りしなければ選ばれていた
+            # はずのマスク」が分かるようにする。まずHungarian法が実際に割り当てていた
+            # マスク(足切りで除外されただけ)を優先し、それも無ければ(マスタ品目数>
+            # マスク数で最初から割当が無かった品目)独立argmaxを使う。sel_i算出のロジック
+            # (922〜938行目付近)からしきい値チェックだけを除いたもの。
+            would_i = pre_reject_assign.get(j)
+            if would_i is None and n_mask:
+                would_i = int(S[:, j].argmax())
+            would_be_mask = f"mask_{would_i + 1}" if would_i is not None else None
+            would_be_score = round(float(S[would_i, j]), 1) if would_i is not None else None
+            # 2026-09-30追加(ユーザー要望): 該当なしの原因を2種類に区別する。
+            # "threshold" = Hungarian法は実際にこの品目へマスクを割り当てていたが、
+            #   しきい値未満だったため除外した(=スコアが低いための足切り)。
+            # "no_assignment" = Hungarian法が一度も割り当てなかった(マスタ品目数>
+            #   マスク数で競合に敗れた、または最初からそのマスクを他品目に取られた)。
+            #   この場合、その品目の実物がこの撮影に写っていない可能性が高い。
+            reject_reason = "threshold" if j in assigned_before_reject else "no_assignment"
+            # 2026-09-30追加(ユーザー要望): 「合計スコアだけじゃ判断できない」ので、
+            # would_be_mask(足切りしなければ選ばれていたはずのマスク)についても
+            # 5キー内訳を出す。対応付け済みの品目と同じ per_key[i, j, k] を、
+            # i=would_iで引くだけ(would_iはsel_i算出ロジックと同じ経路で求めた値)。
+            would_be_by_key = (
+                {key_names[k]: round(float(per_key[would_i, j, k]), 1) for k in range(n_keys)}
+                if would_i is not None else {k: None for k in key_names}
+            )
             all_assignments.append({
                 "book_name": m.get("book_name", ""),
                 "display_name": m.get("display_name", ""),
                 "assigned_mask": None,
                 "winning_key": None,
                 "score": None,
+                # 2026-09-29追加: 該当なしの場合は割当マスクが無いため5キー内訳も無い。
+                # 他品目と列数を揃えるため、値はNoneで埋める。
+                "by_key": {k: None for k in key_names},
+                # 2026-09-30追加: 足切りしなければ選ばれていたはずのマスクとそのスコア。
+                # このスコアはしきい値未満(=該当なしになった理由)のはず。
+                "would_be_mask": would_be_mask,
+                "would_be_score": would_be_score,
+                "would_be_by_key": would_be_by_key,
+                "reject_reason": reject_reason,
                 "is_query": (j == target_j),
             })
             continue
@@ -848,8 +1143,47 @@ def match_text_to_mask_main(
             "assigned_mask": f"mask_{i + 1}",
             "winning_key": key_names[wk_j],
             "score": round(float(per_key[i, j, wk_j]), 1),
+            # 2026-09-29追加(ユーザー要望): target_j(query)以外の品目もper_key内訳を
+            # multikey_match_debug.jsonに残す。以前はtarget_j分のper_mask(全マスク×
+            # target_jの5キー)しか無く、他品目の内訳は再現できなかった。
+            "by_key": {key_names[k]: round(float(per_key[i, j, k]), 1) for k in range(n_keys)},
+            # 対応付け済みなのでwould_be_mask/score/by_key/reject_reasonは対象外(列を揃えるためNoneで埋める)。
+            "would_be_mask": None,
+            "would_be_score": None,
+            "would_be_by_key": {k: None for k in key_names},
+            "reject_reason": None,
             "is_query": (j == target_j),
         })
+
+    # 2026-10-01追加(ユーザー要望): 「全クエリ×全マスク」の完全な採点表が欲しいとのこと。
+    # all_assignmentsは各品目につき対応付け(or 足切り/未割当)された1マスクの内訳しか
+    # 持たず、「このクエリは他のマスクに対してはどんな点数だったか」が分からない。
+    # per_maskは逆に1つの代表クエリ(target_j)に対する全マスクの採点表でしかなく、
+    # クエリを跨いだ比較ができない。以前はクエリごとにフォルダ(debug json)を分けて
+    # 生成しており、per_mask相当の情報がクエリの数だけ存在したが、現在は撮影1枚に
+    # つき1ファイルにまとめているため、target_j以外の品目についてはこの情報が
+    # 失われていた。full_score_matrixとして全品目×全マスクの採点をまるごと残す。
+    full_score_matrix = [
+        {
+            "book_name": m.get("book_name", ""),
+            "display_name": m.get("display_name", ""),
+            "by_mask": {
+                f"mask_{i + 1}": {
+                    "total": round(float(S[i, j]), 1),
+                    "by_key": {
+                        key_names[k]: round(float(per_key[i, j, k]), 1)
+                        for k in range(n_keys)
+                    },
+                    # 2026-10-01追加(ユーザー要望): マスク名だけでは画像上のどの箱を
+                    # 指しているか分からないので、per_maskと同じくそのマスクに帰属した
+                    # OCR文字列(combined[i])も添える。
+                    "text": combined[i][:200],
+                }
+                for i in range(n_mask)
+            },
+        }
+        for j, m in enumerate(master)
+    ]
 
     # ===== デバッグ保存 =====
     try:
@@ -896,6 +1230,7 @@ def match_text_to_mask_main(
                 ],
                 "all_assignments": all_assignments,
                 "ocr_assignments": ocr_debug,
+                "full_score_matrix": full_score_matrix,
             }, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
@@ -910,6 +1245,7 @@ def match_text_to_mask_main(
             ocr_debug=ocr_debug,
             sel_mask_name=f"mask_{sel_i + 1}",
             keys_of_target=_keys_of(master[target_j]),
+            mask=masks[sel_i],
         )
     if save_all_assignments:
         # 全マスク x 全品目の割当結果を1枚にまとめて可視化する
@@ -929,8 +1265,19 @@ def match_text_to_mask_main(
         _save_assignment_overview(
             shot_dir=shot_dir,
             rgb_path=rgb_path,
+            masks=masks,
             boxes=boxes,
             mask_to_item=mask_to_item,
+        )
+    if save_all_perkey_overlays:
+        _save_all_perkey_overlays(
+            shot_dir=shot_dir,
+            rgb_path=rgb_path,
+            ocr_json_path=ocr_json_path,
+            ocr_debug=ocr_debug,
+            all_assignments=all_assignments,
+            master=master,
+            masks=masks,
         )
 
     if not confident:

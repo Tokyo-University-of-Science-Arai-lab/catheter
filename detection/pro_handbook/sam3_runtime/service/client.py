@@ -8,7 +8,9 @@ import urllib.request
 import uuid
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
+
+_LABEL_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
 class Sam3ServiceError(RuntimeError): pass
@@ -57,9 +59,26 @@ class Sam3BatchInfer:
             for index, mask in enumerate(masks):
                 color = colors[index % len(colors)]
                 overlay[mask] = (0.58 * overlay[mask] + 0.42 * color).astype(np.uint8)
-            Image.fromarray(overlay, mode="RGB").save(
-                os.path.join(output_dir, "sam3_all_masks_overlay.png")
-            )
+            overlay_img = Image.fromarray(overlay, mode="RGB")
+            # 2026-09-30追加(ユーザー要望): 足切りされた認識がどのマスクに対応するはずだったか
+            # multikey_match_debug.jsonのmask_{index+1}表記と照合できるよう、各マスクの重心に
+            # 番号を書き込む(masks[index]がmask_{index+1}に対応。命名規則はmultikey_matcher.py側)。
+            draw = ImageDraw.Draw(overlay_img)
+            try:
+                font = ImageFont.truetype(_LABEL_FONT_PATH, 22)
+            except OSError:
+                font = ImageFont.load_default()
+            for index, mask in enumerate(masks):
+                ys, xs = np.nonzero(mask)
+                if len(xs) == 0:
+                    continue
+                cx, cy = int(xs.mean()), int(ys.mean())
+                label = str(index + 1)
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        draw.text((cx + dx, cy + dy), label, fill=(0, 0, 0), font=font, anchor="mm")
+                draw.text((cx, cy), label, fill=(255, 255, 0), font=font, anchor="mm")
+            overlay_img.save(os.path.join(output_dir, "sam3_all_masks_overlay.png"))
             with open(
                 os.path.join(output_dir, "sam3_service_inference.json"),
                 "w",

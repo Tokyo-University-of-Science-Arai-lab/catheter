@@ -1,0 +1,26 @@
+{
+  "licenses": [
+    {
+      "name": "",
+      "id": 0,
+      "url": ""
+    }
+  ],
+  "info": {
+    "contributor": "",
+    "date_created": "",
+    "description": "SAM3 auto-annotation",
+    "url": "",
+    "version": "",
+    "year": ""
+  },
+  "categories": [
+    {
+      "id": 1,
+      "name": "book_spine",
+      "supercategory": ""
+    }
+  ],
+  "images": [],
+  "annotations": []
+}

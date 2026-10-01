@@ -1,0 +1,64 @@
+{
+  "cached_model": true,
+  "pid": 1617812,
+  "ocr_model_create_sec": 1.7120371199998772,
+  "ocr_predict_sec": 1.1027341509907274,
+  "ocr_save_sec": 0.3417817279987503,
+  "input_image": "/home/catheter/pro_book/pro_hand_book_python/reco/0911_crop10/single_image_match_reco_result_20260929_143326/work/3/after_init_rgb.png",
+  "json_path": "/home/catheter/pro_book/pro_hand_book_python/reco/0911_crop10/single_image_match_reco_result_20260929_143326/work/3/ocr_result.json",
+  "overlay_path": "/home/catheter/pro_book/pro_hand_book_python/reco/0911_crop10/single_image_match_reco_result_20260929_143326/work/3/ocr_overlay.png",
+  "save_rotated_input_debug": false,
+  "offline": true,
+  "network_fallback_disabled": true,
+  "offline_environment": {
+    "PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK": "True",
+    "PADDLE_PDX_LOCAL_FONT_FILE_PATH": "/home/catheter/.paddlex/fonts/simfang.ttf"
+  },
+  "offline_assets": {
+    "models": {
+      "text_detection": {
+        "path": "/home/catheter/.paddlex/official_models/PP-OCRv5_server_det",
+        "files": [
+          {
+            "path": "/home/catheter/.paddlex/official_models/PP-OCRv5_server_det/inference.json",
+            "size_bytes": 402480
+          },
+          {
+            "path": "/home/catheter/.paddlex/official_models/PP-OCRv5_server_det/inference.pdiparams",
+            "size_bytes": 87932887
+          },
+          {
+            "path": "/home/catheter/.paddlex/official_models/PP-OCRv5_server_det/inference.yml",
+            "size_bytes": 903
+          }
+        ]
+      },
+      "text_recognition": {
+        "path": "/home/catheter/.paddlex/official_models/PP-OCRv5_server_rec",
+        "files": [
+          {
+            "path": "/home/catheter/.paddlex/official_models/PP-OCRv5_server_rec/inference.json",
+            "size_bytes": 325204
+          },
+          {
+            "path": "/home/catheter/.paddlex/official_models/PP-OCRv5_server_rec/inference.pdiparams",
+            "size_bytes": 84390117
+          },
+          {
+            "path": "/home/catheter/.paddlex/official_models/PP-OCRv5_server_rec/inference.yml",
+            "size_bytes": 148345
+          }
+        ]
+      }
+    },
+    "visualization_font": {
+      "path": "/home/catheter/.paddlex/fonts/simfang.ttf",
+      "size_bytes": 10576012
+    },
+    "recognition_dictionary": {
+      "path": "/home/catheter/.paddlex/official_models/PP-OCRv5_server_rec/config.json",
+      "format": "embedded PostProcess.character_dict",
+      "entries": 18383
+    }
+  }
+}

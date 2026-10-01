@@ -1,0 +1,41 @@
+# fixed_insert_grasp.py 用設定
+# 認識を使わず、撮影姿勢から毎回同じ相対移動で 挿入→把持→引き抜き を行う。
+# 昇降機構は使わない（/target_mm は送信しない）。
+
+robot:
+  xarm:
+    host: 192.168.2.221
+
+# 棚の左右（right / left）。挿入・引き抜きの向きと waypoint の選択に使う
+side: right
+
+# 撮影姿勢のTCPからアプローチ位置までの相対移動（ロボットベース座標系）
+# Retrieval_integration.py では認識結果から算出している部分を、ここで固定値として与える
+approach:
+  dx_mm: 0.0
+  dy_mm: 0.0
+  dz_mm: 0.0
+  droll_deg: 0.0
+
+# アプローチ位置で開くグリッパ開口幅[mm]
+# （Retrieval_integration.py では book_width - 10.0 を渡している）
+gripper_open_width_mm: 10.0
+
+# 撮影姿勢まで init → capture の waypoint で移動してから始めるか
+# false の場合、アームが既に撮影姿勢にある前提で開始する
+start_from_init: true
+
+# 繰り返し回数（2回目以降も init → capture から始める）
+repeat: 1
+
+# 各動作の前に Enter で確認するか（false にすると止まらずに実行する）
+confirm_each_step: true
+
+paths:
+  waypoint:
+    init_to_capture:
+      right: /home/catheter/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/init_to_capture_v2_integration_right.yaml
+      left: /home/catheter/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/init_to_capture_v2_integration_left.yaml
+    capture_to_init:
+      right: /home/catheter/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/capture_to_init_v2_integration.yaml
+      left: /home/catheter/pro_book/pro_hand_book_python/ros2_ws/src/xarm7_teaching/config/capture_to_init_v2_integration-left.yaml

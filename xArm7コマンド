@@ -132,7 +132,7 @@ python reco/scripts/build_width_eval_report.py --suffix _20260822_1xxxxx
 
 ##新しいオフライン認識
 python3 reco/scripts/width_mm_validation.py --dataset <データセット名> [オプション]
-python3 reco/scripts/width_mm_validation.py --dataset ROOB-1 --master-json catheter-100/master_catheter_2.json
+python3 reco/scripts/width_mm_validation.py --dataset ROOB-1 --master-json Master_JSON/master_catheter_2.json
 
     --dataset (必須)   reco/<名前>/ のデータセット名(stand-100, diagonal-40, 任意の新規名)
     --master-json      クエリ一覧のマスタJSON。省略時は reco/master_catheter_reco.json(20品目)
@@ -143,6 +143,46 @@ python3 reco/scripts/width_mm_validation.py --dataset ROOB-1 --master-json cathe
     --no-report        完了後の自動Excelレポート生成(reco_result_<日時>/)を無効化
     --work-suffix      【非推奨・後方互換用】接尾辞を直接指定。通常は省略して自動の日時のみにする
     --verbose          失敗時にトレースバックを表示
+
+###「該当なし」足切りフラグ（multikey_matcher.py、2026-09-26/29追加、既定は全部OFF＝今までと同じ挙動）
+# コマンドの前に環境変数として付ける。そのコマンド1回だけに効く
+MULTIKEY_REJECT_LOW_SCORE=1 MULTIKEY_REJECT_RULE=ref_display_name python3 reco/scripts/width_mm_validation.py --dataset <データセット名> --master-json <パス>
+
+#   MULTIKEY_REJECT_LOW_SCORE=1        足切り機能そのものをON（未設定=OFF、今までと同じ）
+#   MULTIKEY_REJECT_RULE=sum            判定に使うスコアの種類。sum=5キー合計(既定)
+#   MULTIKEY_REJECT_RULE=ref_display_name           REF+商品名の合計（映っていない品目を見分けるのに一番効く。2026-09-26検証）
+#   MULTIKEY_REJECT_THRESHOLD=<数値>    しきい値を直接指定。未指定ならルールごとの既定値(sum=40, ref_display_name=100)
+#
+# OFF（既定）: スコアがどんなに低くても必ず何かのマスクに無理やり対応付ける。「該当なし」にはならない
+# ON: 一番良いマスクのスコアがしきい値未満なら、その品目は「該当なし」になる
+#   → get_book_points.py経由の認識では TargetMaskSelectionError になり、
+#      width_mm_validation.pyのCSVではerror列にエラー名が記録され、予測幅は空欄になる
+#   → multikey_match_debug.jsonのall_assignments(棚全体の一括対応表)でもassigned_mask: nullになる
+# 「リストにあるが画像に無い品目」「画像にあるがリストに無い品目」の実験結果は
+# 原因調査/しきい値足切り分析_20260926/ 参照
+
+###single_image_match_test.py（画像1枚 or フォルダ全部を、マスタ全品目×全マスクで一括対応付け。SAM3/OCRは画像につき1回だけ）
+# 1枚だけ
+python -m catheter.scripts.single_image_match_test --shot-dir reco/<データセット名>/depth_shots/<n> --master-json <パス>
+# depth_shots/の中身を全部(枚数固定なし、width_mm_validation.pyと同じ自動列挙)
+python -m catheter.scripts.single_image_match_test --dataset <データセット名> --master-json <パス>
+# 結果はreco/<データセット名>/single_image_match_reco_result_<日時>/work/<画像名>/に保存される
+# (元データ(--shot-dir/--dataset)には一切書き込まない、2026-09-29修正)
+
+# 上の「該当なし」足切りフラグはこのスクリプトにもそのまま使える(multikey_matcher.pyを直接importしているため)
+MULTIKEY_REJECT_LOW_SCORE=1 MULTIKEY_REJECT_RULE=ref_display_name python -m catheter.scripts.single_image_match_test --dataset <データセット名> --master-json <パス>
+# フラグON時の見え方の違い: CSVのerror列は無い代わりに、
+#   ・ターミナルの「対応付けされなかった品目」一覧に出る
+#   ・images/<品目名>.png が真っ黒画像になる(選択されなかった目印)
+#   ・後述のExcelレポートで「対応付け結果」列が"該当なし"になり、行が黄色になる
+
+# 目視確認用Excel(集計シート付き)＋品目ごとの画像をまとめる
+python3 reco/scripts/build_single_image_match_report.py --result-dir reco/<データセット名>/single_image_match_reco_result_<日時>
+# 出力: <result-dir>/single_image_match_report.xlsx, <result-dir>/images/<画像番号>-<認識した順番>-<品目名>.png
+
+
+
+
 
 
 

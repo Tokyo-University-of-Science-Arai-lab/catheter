@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -113,6 +114,10 @@ def run_capture_and_pca_offline_sam3_refined_sam2_width(
         "target_point_m": list(base["point_3d"]),
         "target_pixel": list(base["target_uv"]),
     }
+    # 2026-09-15: このSAM2互換の幅再計算は base()(=processing_seconds)の
+    # 計測区間の外側で実行される。processing_secondsとelapsed_secの差の
+    # 大半はこの区間なので、ここも個別に計測してtimingsに残す。
+    t_sam2_width = time.perf_counter()
     width_geometry = estimate_sam2_compatible_geometry(
         mask > 0,
         rgb,
@@ -127,11 +132,14 @@ def run_capture_and_pca_offline_sam3_refined_sam2_width(
         geometry_mode="sam2_width_only",
         debug_dir=shot_dir / "sam2_width_debug",
     )
+    sam2_width_geometry_seconds = time.perf_counter() - t_sam2_width
     width_mm = float(width_geometry["width"]["width_mm"])
 
     # Width-only contract: these values are copied directly from the current
     # refine-only path and are never replaced by compatibility candidates.
     result = dict(base)
+    result["timings"] = dict(base.get("timings") or {})
+    result["timings"]["sam2_width_geometry_seconds"] = sam2_width_geometry_seconds
     result.update(
         {
             "variant": VARIANT,

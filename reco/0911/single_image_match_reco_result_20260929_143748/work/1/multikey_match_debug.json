@@ -1,0 +1,1924 @@
+{
+  "query": "10CSW02020",
+  "master_json": "Master_JSON/master_catheter_0911_parcial.json",
+  "master_row": {
+    "book_name": "10CSW02020",
+    "display_name": "Wallaby Avenir Coil System",
+    "LOT": "WCS11772",
+    "expiration date": "2031-12-14",
+    "ISBN_number": "不明",
+    "bookshelf_ID": "1-1-1-1",
+    "book_width": "15.2",
+    "SPEC_1": "2 mm",
+    "SPEC_2": "20 cm"
+  },
+  "assign_method": "hungarian",
+  "score_combine_method": "raw_sum",
+  "threshold": 40,
+  "selected_mask": "mask_15",
+  "independent_selected_mask": "mask_25",
+  "hungarian_changed_selection": true,
+  "selected_score": 75.0,
+  "winning_key": "date",
+  "margin": 12.5,
+  "selected_text_len": 35,
+  "text_plausible": true,
+  "ref_score": 30.0,
+  "support_scores": {
+    "display_name": 59.5,
+    "date": 75.0,
+    "spec_1": 0.0,
+    "spec_2": 0.0
+  },
+  "support_count": 1,
+  "confident": false,
+  "confident_reason": "insufficient_evidence",
+  "confident_rule": "ref_score>=100.0 で無条件に確信あり。それ以外は display_name/date/spec_1/spec_2 のうち2本以上が70.0点以上、かつtext_plausible(len>=7 and looks like REF/date)で確信あり(marginは判定に使わない、参考値としてのみ保存)",
+  "per_mask": [
+    {
+      "mask": "mask_1",
+      "score": 50.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 28.6,
+        "date": 50.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "ITIP ExcelsiorXT-27 BTRAIGNT 150 XT275081 2028-10-08"
+    },
+    {
+      "mask": "mask_2",
+      "score": 50.0,
+      "by_key": {
+        "ref": 40.0,
+        "display_name": 31.8,
+        "date": 50.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "TransForm SUPEREOMPLIANT 2020-01-26 ESC0407"
+    },
+    {
+      "mask": "mask_3",
+      "score": 0.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 35.6,
+        "date": 0.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "AASAHUINTECC CHKAI 0.014\"X2006m"
+    },
+    {
+      "mask": "mask_4",
+      "score": 50.0,
+      "by_key": {
+        "ref": 40.0,
+        "display_name": 33.3,
+        "date": 50.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "stryker AXS Vecta 46 0.046 in 2028-06-29 INC-11814-146 46"
+    },
+    {
+      "mask": "mask_5",
+      "score": 50.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 39.2,
+        "date": 50.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "stryker TransForm SC SUPER COMPLIANT 3 mm mm 5 2027-12-02 ESC0305"
+    },
+    {
+      "mask": "mask_6",
+      "score": 62.5,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 28.6,
+        "date": 62.5,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "Medtronte 147711 202710.14"
+    },
+    {
+      "mask": "mask_7",
+      "score": 0.0,
+      "by_key": {
+        "ref": 37.5,
+        "display_name": 30.0,
+        "date": 0.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "pNOVUS\"17 Microcatheter 150 cm"
+    },
+    {
+      "mask": "mask_8",
+      "score": 0.0,
+      "by_key": {
+        "ref": 30.0,
+        "display_name": 40.0,
+        "date": 0.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "ID:0.071 DAC6F Esperance Distal Aess Cathate 115cm 6F"
+    },
+    {
+      "mask": "mask_9",
+      "score": 0.0,
+      "by_key": {
+        "ref": 18.2,
+        "display_name": 52.9,
+        "date": 0.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "Cell Ryatem WanabyAven"
+    },
+    {
+      "mask": "mask_10",
+      "score": 0.0,
+      "by_key": {
+        "ref": 52.6,
+        "display_name": 33.3,
+        "date": 0.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "MASAHIINTECC CHIKAI10 0.010\"X200cm"
+    },
+    {
+      "mask": "mask_11",
+      "score": 42.9,
+      "by_key": {
+        "ref": 35.3,
+        "display_name": 25.0,
+        "date": 42.9,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "320/190 SpiderFX\""
+    },
+    {
+      "mask": "mask_12",
+      "score": 50.0,
+      "by_key": {
+        "ref": 60.0,
+        "display_name": 29.4,
+        "date": 50.0,
+        "spec_1": 80.0,
+        "spec_2": 0.0
+      },
+      "text": "Eeoua SS 2-3 10 KR045298 303-020310 2020-04-30 12"
+    },
+    {
+      "mask": "mask_13",
+      "score": 50.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 35.9,
+        "date": 50.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": ".Nairobi Frame 103430 229116276 2027-04-30"
+    },
+    {
+      "mask": "mask_14",
+      "score": 57.1,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 34.6,
+        "date": 57.1,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "stryker 360 SOFT Target XL? mm 10 40 cm HEF 612104 2030-05-25 XL"
+    },
+    {
+      "mask": "mask_15",
+      "score": 75.0,
+      "by_key": {
+        "ref": 30.0,
+        "display_name": 59.5,
+        "date": 75.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "Coil System WallabyAveni 2031-04-14"
+    },
+    {
+      "mask": "mask_16",
+      "score": 28.6,
+      "by_key": {
+        "ref": 30.0,
+        "display_name": 17.8,
+        "date": 28.6,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "3.2/3.4Fr..120cm KMDA044178"
+    },
+    {
+      "mask": "mask_17",
+      "score": 40.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 38.9,
+        "date": 40.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "Nano Cotheler Defrictor 1.3Fr/2.2Fr 51172NO7 MV-2N0162028 10 式ヒラ"
+    },
+    {
+      "mask": "mask_18",
+      "score": 62.5,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 29.8,
+        "date": 62.5,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "WTOUTTIP Neuroform Atlas 3.0 2030-12-09 EZAS3021"
+    },
+    {
+      "mask": "mask_19",
+      "score": 0.0,
+      "by_key": {
+        "ref": 0.0,
+        "display_name": 0.0,
+        "date": 0.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "140"
+    },
+    {
+      "mask": "mask_20",
+      "score": 0.0,
+      "by_key": {
+        "ref": 30.0,
+        "display_name": 38.5,
+        "date": 0.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "OPTIMA SUPERSOFT COMPLEX-10 4mm 8cm"
+    },
+    {
+      "mask": "mask_21",
+      "score": 50.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 35.0,
+        "date": 50.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "Siryker 2TIP ExcelsiorXT-17 STRAIGHT 150 7.5 C177SST 2028-01-03"
+    },
+    {
+      "mask": "mask_22",
+      "score": 50.0,
+      "by_key": {
+        "ref": 40.0,
+        "display_name": 40.9,
+        "date": 50.0,
+        "spec_1": 80.0,
+        "spec_2": 0.0
+      },
+      "text": "stryker Synchro SELECT STANDARD STRAIGHT 0.014 215 REF 2029-02-24 SSTD215STR Standard"
+    },
+    {
+      "mask": "mask_23",
+      "score": 0.0,
+      "by_key": {
+        "ref": 30.0,
+        "display_name": 38.5,
+        "date": 0.0,
+        "spec_1": 100.0,
+        "spec_2": 0.0
+      },
+      "text": "OPTIMA\" COMPLEX-10 SUPERSOFT 2mm 4cm"
+    },
+    {
+      "mask": "mask_24",
+      "score": 50.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 31.8,
+        "date": 50.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "Medtronic 21 Catheter . 0.021' 160cm 232639510 F013160-0615-15 2028-11-05"
+    },
+    {
+      "mask": "mask_25",
+      "score": 50.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 41.0,
+        "date": 50.0,
+        "spec_1": 80.0,
+        "spec_2": 0.0
+      },
+      "text": "stryker イドワヤは SHOLRU 2TIP 2HR STRAIGHT 4.0 cm KR046055 2029-03-3 168189 S52-40-070H 2028-02-18 LANELA MEDICAL"
+    },
+    {
+      "mask": "mask_26",
+      "score": 50.0,
+      "by_key": {
+        "ref": 40.0,
+        "display_name": 36.4,
+        "date": 50.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "Nairobi 2028-08-15"
+    },
+    {
+      "mask": "mask_27",
+      "score": 62.5,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 34.1,
+        "date": 62.5,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "Medtronic Catheter 0.027\" 160cm 2096730 FQ16140-0615-15 2028-12-10"
+    },
+    {
+      "mask": "mask_28",
+      "score": 35.3,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 25.6,
+        "date": 35.3,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "SHIDEN -0-1 SD-40040 4.0-4015504Fr0.014 RX ANEEA"
+    },
+    {
+      "mask": "mask_29",
+      "score": 50.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 61.5,
+        "date": 50.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "Coll System Wallaby Avenir 10 10 2031-05-09"
+    },
+    {
+      "mask": "mask_30",
+      "score": 0.0,
+      "by_key": {
+        "ref": 35.3,
+        "display_name": 28.6,
+        "date": 0.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "Excelsior®SL-10? 150"
+    },
+    {
+      "mask": "mask_31",
+      "score": 50.0,
+      "by_key": {
+        "ref": 42.1,
+        "display_name": 40.0,
+        "date": 50.0,
+        "spec_1": 80.0,
+        "spec_2": 0.0
+      },
+      "text": "Nairobi Extra Soft AP0-1.5-2-HX-E 2028-04-09"
+    },
+    {
+      "mask": "mask_32",
+      "score": 53.3,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 33.3,
+        "date": 53.3,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "ED.COULO ES 4-8 30元m 04430 2027-10-3 14"
+    },
+    {
+      "mask": "mask_33",
+      "score": 53.3,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 36.0,
+        "date": 53.3,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "text": "OPTIMA\" SUPERSOFT COMPLEX-10 1.5 2cm OPTOICSS1O 2029-15-13 20415.13"
+    }
+  ],
+  "all_assignments": [
+    {
+      "book_name": "10CSW02020",
+      "display_name": "Wallaby Avenir Coil System",
+      "assigned_mask": "mask_15",
+      "winning_key": "date",
+      "score": 75.0,
+      "by_key": {
+        "ref": 30.0,
+        "display_name": 59.5,
+        "date": 75.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "is_query": true
+    },
+    {
+      "book_name": "AIN-CKI-200R",
+      "display_name": "CHIKAI",
+      "assigned_mask": "mask_10",
+      "winning_key": "spec_2",
+      "score": 100.0,
+      "by_key": {
+        "ref": 41.7,
+        "display_name": 100.0,
+        "date": 0.0,
+        "spec_1": 0.0,
+        "spec_2": 100.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "MONORAIL",
+      "display_name": "Coyote ES",
+      "assigned_mask": "mask_18",
+      "winning_key": "spec_1",
+      "score": 80.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 44.4,
+        "date": 50.0,
+        "spec_1": 80.0,
+        "spec_2": 0.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "ESC0407",
+      "display_name": "TransForm",
+      "assigned_mask": "mask_2",
+      "winning_key": "display_name",
+      "score": 100.0,
+      "by_key": {
+        "ref": 100.0,
+        "display_name": 100.0,
+        "date": 62.5,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "MAT-110-110",
+      "display_name": "Riptide Large Bore Aspiration Tubing",
+      "assigned_mask": "mask_6",
+      "winning_key": "date",
+      "score": 100.0,
+      "by_key": {
+        "ref": 45.5,
+        "display_name": 25.0,
+        "date": 100.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "XT275081",
+      "display_name": "Excelsior XT-27",
+      "assigned_mask": "mask_1",
+      "winning_key": "ref",
+      "score": 100.0,
+      "by_key": {
+        "ref": 100.0,
+        "display_name": 93.3,
+        "date": 75.0,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "OPTI0408CSS10",
+      "display_name": "OPTIMA",
+      "assigned_mask": "mask_20",
+      "winning_key": "spec_1",
+      "score": 100.0,
+      "by_key": {
+        "ref": 47.6,
+        "display_name": 100.0,
+        "date": 0.0,
+        "spec_1": 100.0,
+        "spec_2": 100.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "ESC0305",
+      "display_name": "TransForm",
+      "assigned_mask": "mask_5",
+      "winning_key": "spec_1",
+      "score": 100.0,
+      "by_key": {
+        "ref": 100.0,
+        "display_name": 100.0,
+        "date": 100.0,
+        "spec_1": 100.0,
+        "spec_2": 80.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "MIV-2N316",
+      "display_name": "Defrictor",
+      "assigned_mask": "mask_17",
+      "winning_key": "display_name",
+      "score": 100.0,
+      "by_key": {
+        "ref": 77.8,
+        "display_name": 100.0,
+        "date": 61.5,
+        "spec_1": 0.0,
+        "spec_2": 0.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "OPTI0152CSS10",
+      "display_name": "OPTIMA",
+      "assigned_mask": "mask_33",
+      "winning_key": "spec_2",
+      "score": 100.0,
+      "by_key": {
+        "ref": 69.2,
+        "display_name": 100.0,
+        "date": 53.3,
+        "spec_1": 80.0,
+        "spec_2": 100.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "C1775ST",
+      "display_name": "Excelsior XT-17",
+      "assigned_mask": "mask_21",
+      "winning_key": "spec_1",
+      "score": 80.0,
+      "by_key": {
+        "ref": 85.7,
+        "display_name": 93.3,
+        "date": 100.0,
+        "spec_1": 80.0,
+        "spec_2": 0.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "FG13160-0615-1S",
+      "display_name": "Phenom",
+      "assigned_mask": "mask_24",
+      "winning_key": "spec_2",
+      "score": 100.0,
+      "by_key": {
+        "ref": 86.7,
+        "display_name": 33.3,
+        "date": 100.0,
+        "spec_1": 80.0,
+        "spec_2": 100.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "DAC6F115",
+      "display_name": "Esperance Distal Access Catheter",
+      "assigned_mask": "mask_8",
+      "winning_key": "spec_1",
+      "score": 100.0,
+      "by_key": {
+        "ref": 62.5,
+        "display_name": 87.5,
+        "date": 0.0,
+        "spec_1": 100.0,
+        "spec_2": 100.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "SD-40040",
+      "display_name": "SHIDEN",
+      "assigned_mask": "mask_25",
+      "winning_key": "spec_1",
+      "score": 80.0,
+      "by_key": {
+        "ref": 62.5,
+        "display_name": 33.3,
+        "date": 80.0,
+        "spec_1": 80.0,
+        "spec_2": 80.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "KMDA044178",
+      "display_name": "Guidepost",
+      "assigned_mask": "mask_16",
+      "winning_key": "spec_1",
+      "score": 100.0,
+      "by_key": {
+        "ref": 100.0,
+        "display_name": 11.8,
+        "date": 14.3,
+        "spec_1": 100.0,
+        "spec_2": 100.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "APB-1.5-2-HX-ES",
+      "display_name": "Axium Prime",
+      "assigned_mask": "mask_31",
+      "winning_key": "spec_1",
+      "score": 80.0,
+      "by_key": {
+        "ref": 86.7,
+        "display_name": 50.0,
+        "date": 100.0,
+        "spec_1": 80.0,
+        "spec_2": 80.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "SS2-40-070H",
+      "display_name": "SHOURYU2",
+      "assigned_mask": "mask_13",
+      "winning_key": "spec_1",
+      "score": 80.0,
+      "by_key": {
+        "ref": 52.6,
+        "display_name": 25.0,
+        "date": 62.5,
+        "spec_1": 80.0,
+        "spec_2": 0.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "1681189",
+      "display_name": "Excelsior SL-10",
+      "assigned_mask": "mask_4",
+      "winning_key": "spec_2",
+      "score": 80.0,
+      "by_key": {
+        "ref": 57.1,
+        "display_name": 30.8,
+        "date": 75.0,
+        "spec_1": 0.0,
+        "spec_2": 80.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "10CSW01010",
+      "display_name": "Wallaby Avenir Coil System",
+      "assigned_mask": "mask_29",
+      "winning_key": "spec_2",
+      "score": 80.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 61.5,
+        "date": 100.0,
+        "spec_1": 0.0,
+        "spec_2": 80.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "OPTI0204CSS10",
+      "display_name": "OPTIMA",
+      "assigned_mask": "mask_23",
+      "winning_key": "spec_1",
+      "score": 100.0,
+      "by_key": {
+        "ref": 47.1,
+        "display_name": 100.0,
+        "date": 0.0,
+        "spec_1": 100.0,
+        "spec_2": 100.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "SSTD215STR",
+      "display_name": "Synchro SELECT",
+      "assigned_mask": "mask_22",
+      "winning_key": "spec_1",
+      "score": 80.0,
+      "by_key": {
+        "ref": 100.0,
+        "display_name": 100.0,
+        "date": 100.0,
+        "spec_1": 80.0,
+        "spec_2": 0.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "373-040830",
+      "display_name": "i-ED COIL",
+      "assigned_mask": "mask_32",
+      "winning_key": "spec_1",
+      "score": 80.0,
+      "by_key": {
+        "ref": 50.0,
+        "display_name": 62.5,
+        "date": 93.3,
+        "spec_1": 80.0,
+        "spec_2": 80.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "612104",
+      "display_name": "Target XL",
+      "assigned_mask": "mask_14",
+      "winning_key": "spec_2",
+      "score": 100.0,
+      "by_key": {
+        "ref": 100.0,
+        "display_name": 100.0,
+        "date": 62.5,
+        "spec_1": 80.0,
+        "spec_2": 100.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "MC1715000",
+      "display_name": "pNOVUS",
+      "assigned_mask": "mask_7",
+      "winning_key": "spec_2",
+      "score": 100.0,
+      "by_key": {
+        "ref": 40.0,
+        "display_name": 100.0,
+        "date": 0.0,
+        "spec_1": 80.0,
+        "spec_2": 100.0
+      },
+      "is_query": false
+    },
+    {
+      "book_name": "APB-2-3-HX-ES",
+      "display_name": "Axium Prime",
+      "assigned_mask": "mask_12",
+      "winning_key": "spec_1",
+      "score": 80.0,
+      "by_key": {
+        "ref": 32.0,
+        "display_name": 23.5,
+        "date": 62.5,
+        "spec_1": 80.0,
+        "spec_2": 80.0
+      },
+      "is_query": false
+    }
+  ],
+  "ocr_assignments": [
+    {
+      "ocr_index": 2,
+      "text": "WanabyAven",
+      "matched": "mask_9",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 3,
+      "text": "Cell Ryatem",
+      "matched": "mask_9",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 4,
+      "text": "AASAHUINTECC",
+      "matched": "mask_3",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 5,
+      "text": "CHKAI",
+      "matched": "mask_3",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 6,
+      "text": "0.014\"X2006m",
+      "matched": "mask_3",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 9,
+      "text": "140",
+      "matched": "mask_19",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 11,
+      "text": "TransForm",
+      "matched": "mask_2",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 12,
+      "text": "SUPEREOMPLIANT",
+      "matched": "mask_2",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 14,
+      "text": "ESC0407",
+      "matched": "mask_2",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 15,
+      "text": "Medtronte",
+      "matched": "mask_6",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 18,
+      "text": "2020-01-26",
+      "matched": "mask_2",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 19,
+      "text": "147711",
+      "matched": "mask_6",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 20,
+      "text": "202710.14",
+      "matched": "mask_6",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 22,
+      "text": "ExcelsiorXT-27",
+      "matched": "mask_1",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 23,
+      "text": "ITIP",
+      "matched": "mask_1",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 24,
+      "text": "BTRAIGNT",
+      "matched": "mask_1",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 25,
+      "text": "150",
+      "matched": "mask_1",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 27,
+      "text": "XT275081",
+      "matched": "mask_1",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 28,
+      "text": "2028-10-08",
+      "matched": "mask_1",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 29,
+      "text": "Neuroform Atlas",
+      "matched": "mask_18",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 30,
+      "text": "WTOUTTIP",
+      "matched": "mask_18",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 31,
+      "text": "3.0",
+      "matched": "mask_18",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 32,
+      "text": "EZAS3021",
+      "matched": "mask_18",
+      "overlap_ratio": 0.997
+    },
+    {
+      "ocr_index": 34,
+      "text": "2030-12-09",
+      "matched": "mask_18",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 35,
+      "text": ".Nairobi",
+      "matched": "mask_13",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 36,
+      "text": "Frame",
+      "matched": "mask_13",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 38,
+      "text": "103430",
+      "matched": "mask_13",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 39,
+      "text": "229116276",
+      "matched": "mask_13",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 40,
+      "text": "2027-04-30",
+      "matched": "mask_13",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 41,
+      "text": "Coil System",
+      "matched": "mask_15",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 42,
+      "text": "WallabyAveni",
+      "matched": "mask_15",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 43,
+      "text": "2031-04-14",
+      "matched": "mask_15",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 44,
+      "text": "Eeoua",
+      "matched": "mask_12",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 45,
+      "text": "SS",
+      "matched": "mask_12",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 46,
+      "text": "2-3",
+      "matched": "mask_12",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 47,
+      "text": "10",
+      "matched": "mask_12",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 48,
+      "text": "KR045298",
+      "matched": "mask_12",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 49,
+      "text": "303-020310",
+      "matched": "mask_12",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 50,
+      "text": "12",
+      "matched": "mask_12",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 51,
+      "text": "2020-04-30",
+      "matched": "mask_12",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 52,
+      "text": "Medtronic",
+      "matched": "mask_27",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 53,
+      "text": "Catheter",
+      "matched": "mask_27",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 54,
+      "text": "0.027\"",
+      "matched": "mask_27",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 55,
+      "text": "160cm",
+      "matched": "mask_27",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 56,
+      "text": "FQ16140-0615-15",
+      "matched": "mask_27",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 58,
+      "text": "2096730",
+      "matched": "mask_27",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 59,
+      "text": "2028-12-10",
+      "matched": "mask_27",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 60,
+      "text": "320/190",
+      "matched": "mask_11",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 61,
+      "text": "SpiderFX\"",
+      "matched": "mask_11",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 63,
+      "text": "stryker",
+      "matched": "mask_4",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 65,
+      "text": "AXS",
+      "matched": "mask_4",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 66,
+      "text": "Vecta",
+      "matched": "mask_4",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 67,
+      "text": "46",
+      "matched": "mask_4",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 68,
+      "text": "0.046",
+      "matched": "mask_4",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 69,
+      "text": "INC-11814-146",
+      "matched": "mask_4",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 70,
+      "text": "in",
+      "matched": "mask_4",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 71,
+      "text": "2028-06-29",
+      "matched": "mask_4",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 72,
+      "text": "46",
+      "matched": "mask_4",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 73,
+      "text": "MASAHIINTECC",
+      "matched": "mask_10",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 74,
+      "text": "CHIKAI10",
+      "matched": "mask_10",
+      "overlap_ratio": 0.985
+    },
+    {
+      "ocr_index": 77,
+      "text": "0.010\"X200cm",
+      "matched": "mask_10",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 79,
+      "text": "OPTIMA",
+      "matched": "mask_20",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 80,
+      "text": "COMPLEX-10",
+      "matched": "mask_20",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 81,
+      "text": "SUPERSOFT",
+      "matched": "mask_20",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 82,
+      "text": "4mm",
+      "matched": "mask_20",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 83,
+      "text": "8cm",
+      "matched": "mask_20",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 84,
+      "text": "stryker",
+      "matched": "mask_5",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 85,
+      "text": "TransForm",
+      "matched": "mask_5",
+      "overlap_ratio": 0.998
+    },
+    {
+      "ocr_index": 86,
+      "text": "SC SUPER COMPLIANT",
+      "matched": "mask_5",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 87,
+      "text": "3",
+      "matched": "mask_5",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 88,
+      "text": "5",
+      "matched": "mask_5",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 90,
+      "text": "ESC0305",
+      "matched": "mask_5",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 91,
+      "text": "mm",
+      "matched": "mask_5",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 92,
+      "text": "mm",
+      "matched": "mask_5",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 94,
+      "text": "2027-12-02",
+      "matched": "mask_5",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 95,
+      "text": "Defrictor",
+      "matched": "mask_17",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 96,
+      "text": "1.3Fr/2.2Fr",
+      "matched": "mask_17",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 97,
+      "text": "MV-2N0162028 10",
+      "matched": "mask_17",
+      "overlap_ratio": 0.995
+    },
+    {
+      "ocr_index": 98,
+      "text": "Nano Cotheler",
+      "matched": "mask_17",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 99,
+      "text": "51172NO7",
+      "matched": "mask_17",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 100,
+      "text": "式ヒラ",
+      "matched": "mask_17",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 101,
+      "text": "OPTIMA\"",
+      "matched": "mask_33",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 102,
+      "text": "COMPLEX-10",
+      "matched": "mask_33",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 103,
+      "text": "1.5",
+      "matched": "mask_33",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 104,
+      "text": "2cm",
+      "matched": "mask_33",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 105,
+      "text": "OPTOICSS1O",
+      "matched": "mask_33",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 106,
+      "text": "SUPERSOFT",
+      "matched": "mask_33",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 108,
+      "text": "2029-15-13",
+      "matched": "mask_33",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 110,
+      "text": "20415.13",
+      "matched": "mask_33",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 112,
+      "text": "Siryker",
+      "matched": "mask_21",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 114,
+      "text": "ExcelsiorXT-17",
+      "matched": "mask_21",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 115,
+      "text": "2TIP",
+      "matched": "mask_21",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 116,
+      "text": "STRAIGHT",
+      "matched": "mask_21",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 117,
+      "text": "150",
+      "matched": "mask_21",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 118,
+      "text": "7.5",
+      "matched": "mask_21",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 119,
+      "text": "C177SST",
+      "matched": "mask_21",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 120,
+      "text": "2028-01-03",
+      "matched": "mask_21",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 121,
+      "text": "Medtronic",
+      "matched": "mask_24",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 122,
+      "text": "21",
+      "matched": "mask_24",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 123,
+      "text": "Catheter",
+      "matched": "mask_24",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 124,
+      "text": ".",
+      "matched": "mask_24",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 125,
+      "text": "0.021'",
+      "matched": "mask_24",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 126,
+      "text": "160cm",
+      "matched": "mask_24",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 127,
+      "text": "F013160-0615-15",
+      "matched": "mask_24",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 128,
+      "text": "232639510",
+      "matched": "mask_24",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 129,
+      "text": "2028-11-05",
+      "matched": "mask_24",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 130,
+      "text": "DAC6F",
+      "matched": "mask_8",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 131,
+      "text": "Esperance",
+      "matched": "mask_8",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 132,
+      "text": "115cm",
+      "matched": "mask_8",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 133,
+      "text": "ID:0.071",
+      "matched": "mask_8",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 134,
+      "text": "Distal Aess Cathate",
+      "matched": "mask_8",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 135,
+      "text": "6F",
+      "matched": "mask_8",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 137,
+      "text": "SHIDEN",
+      "matched": "mask_28",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 139,
+      "text": "SD-40040",
+      "matched": "mask_28",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 141,
+      "text": "4.0-4015504Fr0.014",
+      "matched": "mask_28",
+      "overlap_ratio": 0.985
+    },
+    {
+      "ocr_index": 142,
+      "text": "-0-1",
+      "matched": "mask_28",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 143,
+      "text": "RX",
+      "matched": "mask_28",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 144,
+      "text": "ANEEA",
+      "matched": "mask_28",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 147,
+      "text": "3.2/3.4Fr..120cm",
+      "matched": "mask_16",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 150,
+      "text": "KMDA044178",
+      "matched": "mask_16",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 151,
+      "text": "Nairobi",
+      "matched": "mask_31",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 152,
+      "text": "Extra",
+      "matched": "mask_31",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 153,
+      "text": "Soft",
+      "matched": "mask_31",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 154,
+      "text": "AP0-1.5-2-HX-E",
+      "matched": "mask_31",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 156,
+      "text": "2028-04-09",
+      "matched": "mask_31",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 157,
+      "text": "イドワヤは",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 158,
+      "text": "SHOLRU",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 159,
+      "text": "2HR",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 160,
+      "text": "4.0",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 161,
+      "text": "S52-40-070H",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 162,
+      "text": "KR046055",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 163,
+      "text": "MEDICAL",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 164,
+      "text": "LANELA",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 165,
+      "text": "2029-03-3",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 166,
+      "text": "stryker",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 167,
+      "text": "Excelsior®SL-10?",
+      "matched": "mask_30",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 168,
+      "text": "150",
+      "matched": "mask_30",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 170,
+      "text": "168189",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 171,
+      "text": "2TIP",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 172,
+      "text": "STRAIGHT",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 173,
+      "text": "cm",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 174,
+      "text": "2028-02-18",
+      "matched": "mask_25",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 175,
+      "text": "Wallaby Avenir",
+      "matched": "mask_29",
+      "overlap_ratio": 0.979
+    },
+    {
+      "ocr_index": 176,
+      "text": "Coll System",
+      "matched": "mask_29",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 177,
+      "text": "10",
+      "matched": "mask_29",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 178,
+      "text": "10",
+      "matched": "mask_29",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 180,
+      "text": "2031-05-09",
+      "matched": "mask_29",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 181,
+      "text": "OPTIMA\"",
+      "matched": "mask_23",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 182,
+      "text": "COMPLEX-10",
+      "matched": "mask_23",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 183,
+      "text": "SUPERSOFT",
+      "matched": "mask_23",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 184,
+      "text": "2mm",
+      "matched": "mask_23",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 185,
+      "text": "4cm",
+      "matched": "mask_23",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 186,
+      "text": "stryker",
+      "matched": "mask_22",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 188,
+      "text": "Synchro SELECT",
+      "matched": "mask_22",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 189,
+      "text": "0.014",
+      "matched": "mask_22",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 190,
+      "text": "215",
+      "matched": "mask_22",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 191,
+      "text": "REF",
+      "matched": "mask_22",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 192,
+      "text": "SSTD215STR",
+      "matched": "mask_22",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 193,
+      "text": "STANDARD STRAIGHT",
+      "matched": "mask_22",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 194,
+      "text": "Standard",
+      "matched": "mask_22",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 196,
+      "text": "2029-02-24",
+      "matched": "mask_22",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 197,
+      "text": "ED.COULO",
+      "matched": "mask_32",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 198,
+      "text": "ES",
+      "matched": "mask_32",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 199,
+      "text": "4-8",
+      "matched": "mask_32",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 200,
+      "text": "30元m",
+      "matched": "mask_32",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 201,
+      "text": "04430",
+      "matched": "mask_32",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 202,
+      "text": "14",
+      "matched": "mask_32",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 203,
+      "text": "2027-10-3",
+      "matched": "mask_32",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 204,
+      "text": "stryker",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 206,
+      "text": "Target XL?",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 207,
+      "text": "10",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 208,
+      "text": "40",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 209,
+      "text": "HEF",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 210,
+      "text": "612104",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 211,
+      "text": "XL",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 212,
+      "text": "360 SOFT",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 213,
+      "text": "mm",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 214,
+      "text": "cm",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 216,
+      "text": "2030-05-25",
+      "matched": "mask_14",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 217,
+      "text": "pNOVUS\"17",
+      "matched": "mask_7",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 218,
+      "text": "150",
+      "matched": "mask_7",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 219,
+      "text": "Microcatheter",
+      "matched": "mask_7",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 220,
+      "text": "cm",
+      "matched": "mask_7",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 222,
+      "text": "Nairobi",
+      "matched": "mask_26",
+      "overlap_ratio": 1.0
+    },
+    {
+      "ocr_index": 223,
+      "text": "2028-08-15",
+      "matched": "mask_26",
+      "overlap_ratio": 1.0
+    }
+  ]
+}
