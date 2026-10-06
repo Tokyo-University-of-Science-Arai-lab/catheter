@@ -50,7 +50,7 @@ class ShelfIDManager:
 
     #TCPのZ微調整（moveLでやる）: C -> tcp_z_offset_mm
     TCP_Z_OFFSET_MAP = {
-       1: 60.0, #カテーテル用は120
+       1: 120.0, #カテーテル用は120, 理大祭用の棚は60
        2: 0.0,
        3: 0.0,
        4: 50.0,

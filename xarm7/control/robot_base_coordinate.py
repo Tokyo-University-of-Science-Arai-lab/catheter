@@ -180,7 +180,7 @@ def print_camera_debug_info(
     arm: XArm7,
     p_cam_mm: np.ndarray,
     *,
-    handeye_json_path: str | Path = "/home/book/pro_book/pro_hand_book_python/xarm7/handeye_pairs/handeye_T_tcp_cam_20260717_223007 copy.json",
+    handeye_json_path: str | Path = DEFAULT_HANDEYE_JSON_PATH,
     dy_adj_mm: float = 0.0,
 ) -> np.ndarray:
     """

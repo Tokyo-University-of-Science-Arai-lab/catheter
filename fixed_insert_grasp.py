@@ -85,6 +85,13 @@ def run_once(config, arm, hand, monitor, waypoint_node, executor, from_init):
         confirm(config, "init → 撮影姿勢へ移動")
         play_waypoint(waypoint_node, executor, wp["init_to_capture"][side])
 
+    # ===== 撮影姿勢の高さ調整 =====
+    capture_dz = float(config.get("capture_dz_mm", 0.0))
+    if capture_dz != 0.0:
+        confirm(config, f"撮影姿勢の高さを {capture_dz:+.1f} mm 調整")
+        safe_motion(lambda: arm.moveL_tcp_z_offset(capture_dz), monitor, "capture_dz")
+        time.sleep(1.0)
+
     capture_pose = arm.get_tcp_pose(is_radian=True)
     print(f"""
     ===== 固定動作 =====

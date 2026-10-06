@@ -9,6 +9,10 @@ robot:
 # 棚の左右（right / left）。挿入・引き抜きの向きと waypoint の選択に使う
 side: right
 
+# 撮影姿勢の高さ調整[mm]（waypoint で着いた撮影姿勢から TCP を Z 方向に相対移動。+で上、-で下）
+# 昇降機構を使わないので、高さはここで変える。アプローチはこの調整後の位置が基準になる
+capture_dz_mm: 0.0
+
 # 撮影姿勢のTCPからアプローチ位置までの相対移動（ロボットベース座標系）
 # Retrieval_integration.py では認識結果から算出している部分を、ここで固定値として与える
 approach:

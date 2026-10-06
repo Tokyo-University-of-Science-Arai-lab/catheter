@@ -121,6 +121,68 @@ class XArm7C(XArm7):
             check_result("挿入停止", result)
             time.sleep(0.2)
 
+        def start_return_current_log():
+            """復帰動作中の全関節電流を別スレッドでCSVへ記録する。
+
+            記録の失敗で復帰動作を止めないよう、例外はすべて握りつぶす。
+            戻り値は記録を止める関数。
+            """
+            import csv
+            import threading
+
+            stop_event = threading.Event()
+            rows = []
+            log_start = time.monotonic()
+
+            def sample_loop():
+                while not stop_event.is_set():
+                    try:
+                        rows.append(
+                            [f"{time.monotonic() - log_start:.3f}"]
+                            + list(arm.currents or [])[:7]
+                            + list(arm.angles or [])[:7]
+                            + list(arm.position or [])[:3]
+                            + [arm.state, arm.error_code, arm.warn_code]
+                        )
+                    except Exception:
+                        pass
+                    stop_event.wait(sample_interval)
+
+            thread = threading.Thread(target=sample_loop, daemon=True)
+            thread.start()
+
+            def stop_logging():
+                try:
+                    stop_event.set()
+                    thread.join(timeout=1.0)
+
+                    log_dir = RETURN_CURRENT_LOG_DIR
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                    log_path = log_dir / (
+                        "return_current_"
+                        f"{datetime.now():%Y%m%d_%H%M%S}.csv"
+                    )
+
+                    with open(log_path, "w", newline="") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(
+                            ["t_s"]
+                            + [f"i_j{n}" for n in range(1, 8)]
+                            + [f"angle_j{n}" for n in range(1, 8)]
+                            + ["tcp_x", "tcp_y", "tcp_z"]
+                            + ["state", "error_code", "warn_code"]
+                        )
+                        writer.writerows(rows)
+
+                    print(
+                        "[RETURN LOG] 復帰中の電流を保存: "
+                        f"{log_path} ({len(rows)}行)"
+                    )
+                except Exception as log_exc:
+                    print(f"[RETURN LOG] 保存失敗: {log_exc}")
+
+            return stop_logging
+
         def return_to_capture_pose():
             if return_joint_angles is None:
                 return
@@ -172,13 +234,23 @@ class XArm7C(XArm7):
             # Retrieval_integration_SAM3.py（xarm7.py本来の実装）と
             # 同じ、直接moveJでの復帰に戻す。
             # ==================================================
-            result = arm.set_servo_angle(
-                angle=list(return_joint_angles),
-                speed=return_speed,
-                mvacc=return_acceleration,
-                wait=True,
-                is_radian=False,
-            )
+            # ==================================================
+            # 復帰動作そのものは変更しない(wait=Trueのまま)。
+            # 復帰中の引っかかり検知しきい値を実機データから決めるため、
+            # 別スレッドで全関節電流をCSVへ記録するだけ。
+            # ==================================================
+            stop_logging = start_return_current_log()
+
+            try:
+                result = arm.set_servo_angle(
+                    angle=list(return_joint_angles),
+                    speed=return_speed,
+                    mvacc=return_acceleration,
+                    wait=True,
+                    is_radian=False,
+                )
+            finally:
+                stop_logging()
 
             check_result(
                 "撮影姿勢への復帰",
@@ -302,6 +374,9 @@ CONFIG_PATH = SCRIPT_DIR / "Retrieval_integration.yaml"
 # J1電流閾値を検知した場合の最大試行回数（初回を含む）
 # 4回すべて失敗した場合は、その本を失敗扱いにして次の本へ進む。
 MAX_CURRENT_INSERT_ATTEMPTS = 4
+
+# 電流検知後に撮影姿勢へ戻る間の全関節電流ログ(CSV)の保存先
+RETURN_CURRENT_LOG_DIR = SCRIPT_DIR / "logfile" / "return_current"
 
 LOG_HEADER = [
     "timestamp",

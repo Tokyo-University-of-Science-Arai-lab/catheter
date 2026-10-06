@@ -1,5 +1,5 @@
 id:
-  port: '/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTAAMOXS-if00-port0' # linux
+  port: '/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBIN584-if00-port0' # linux
   baudrate: 57600
   gripper: 1
   spacer_rot: 2
@@ -15,8 +15,11 @@ pos:
     rad_to_step: 651.8986
     step_to_rad: 0.00153398
     gear_ratio: 20
-    calib_width_a:  1.100714
-    calib_width_b: -7.863810  #-0.3384 #-6.1
+    calib_width_a: 1.133750  #1.100714
+    calib_width_b: 12.876667 #-7.863810  #-0.3384 #-6.1
+
+
+    
 
   spacer_rot:
     zero: 1473
