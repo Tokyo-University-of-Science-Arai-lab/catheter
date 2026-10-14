@@ -58,6 +58,16 @@ def safe_name(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in (s or ""))
 
 
+def _shot_sort_key(p: Path):
+    """撮影フォルダ名(work/<N>/)を並べるキー(2026-10-07追加、ユーザー報告のバグ修正)。
+
+    従来は key=lambda p: p.name という文字列ソートだったため、"1","10","11",...,
+    "19","2",... という辞書順になってしまい、Excelの行順も「認識した順番」列の
+    連番も撮影順とズレていた(33品目×1周目の34行目が画像2ではなく画像10になる等)。
+    フォルダ名が数字なら数値として比較し、数字でなければ従来通り文字列として比較する。"""
+    return (0, int(p.name)) if p.name.isdigit() else (1, p.name)
+
+
 def absent_reason_text(a: dict) -> str:
     """該当なしになった理由を人が読める文にする(2026-09-30追加、ユーザー要望)。
 
@@ -177,7 +187,7 @@ def build_report(result_dir: Path) -> None:
 
     rows = []
     order = 0
-    for shot_dir in sorted(work_root.iterdir(), key=lambda p: p.name):
+    for shot_dir in sorted(work_root.iterdir(), key=_shot_sort_key):
         debug_path = shot_dir / "multikey_match_debug.json"
         if not debug_path.exists():
             continue
