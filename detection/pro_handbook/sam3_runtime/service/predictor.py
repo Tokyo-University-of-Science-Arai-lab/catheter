@@ -17,8 +17,16 @@ from .settings import (
 def infer_array(loaded, image: np.ndarray, prompt: str = PROMPT):
     if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
         raise ValueError(f"expected RGB uint8 HxWx3 array, got {image.shape} {image.dtype}")
+    baseline_mb = 0.0
     if loaded.device == "cuda":
         torch.cuda.synchronize()
+        # 画像ごとの推論ピークを測るため、推論の直前にカウンタを戻す。
+        # max_memory_allocated() はプロセス開始からの累積最大なので、リセットしないと
+        # モデル読み込み時のピークで張り付き、解像度ごとの比較ができない
+        # (2026-10-15、解像度比較試験で 1280 の方が 1920 より大きい値が出たため追加)。
+        # baseline_mb は常駐分(モデルの重み等)で、gpu_memory_mb との差が推論の増分になる。
+        baseline_mb = torch.cuda.memory_allocated() / (1024 * 1024)
+        torch.cuda.reset_peak_memory_stats()
     started = time.perf_counter()
     # Sam3Adapter accepts ndarray as OpenCV BGR, while the service contract is
     # RGB. Passing RGB as PIL-equivalent is achieved by reversing to BGR here;
@@ -51,6 +59,7 @@ def infer_array(loaded, image: np.ndarray, prompt: str = PROMPT):
         "nms_count": int(instances.count),
         "inference_seconds": time.perf_counter() - started,
         "gpu_memory_mb": gpu_mb,
+        "gpu_baseline_mb": baseline_mb,
         "score_threshold": SCORE_THRESHOLD,
         "processor_confidence_threshold": PROCESSOR_CONFIDENCE_THRESHOLD,
         "min_area": MIN_AREA,

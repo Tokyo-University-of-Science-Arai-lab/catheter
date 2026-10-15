@@ -24,6 +24,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -81,6 +82,44 @@ def _build_xlsx_report(out_root: Path) -> None:
     except Exception as e:
         print(f"⚠ Excelレポートの自動生成に失敗しました(認識結果自体は保存済みです): "
               f"{type(e).__name__}: {e}")
+
+
+def _write_timing(shot_dir: Path, timing: dict) -> None:
+    """処理時間の内訳を work/<N>/timing.json に保存する(2026-10-15追加)。
+
+    get_book_points.py が [TIME] 行で標準出力に出しているのと同じ4区間
+    (SAM total / OCR wall / merge OCR+SAM / 全体)を、集計できるようファイルに残す。
+    サービス側の sam3_service_inference.json と OCR 側の ocr_runtime_info.json から
+    内訳も取り込み、クライアント側との差(転送・変換のオーバーヘッド)を出す。
+    """
+    out = dict(timing)
+    sam_json = shot_dir / "sam3_service_inference.json"
+    if sam_json.exists():
+        try:
+            meta = json.loads(sam_json.read_text(encoding="utf-8")).get("service_metadata", {})
+            for k_src, k_dst in (("inference_seconds", "sam_inference_sec"),
+                                  ("gpu_memory_mb", "gpu_peak_mb"),
+                                  ("gpu_baseline_mb", "gpu_baseline_mb")):
+                if meta.get(k_src) is not None:
+                    out[k_dst] = float(meta[k_src])
+        except (ValueError, OSError):
+            pass
+    ocr_json = shot_dir / "ocr_runtime_info.json"
+    if ocr_json.exists():
+        try:
+            info = json.loads(ocr_json.read_text(encoding="utf-8"))
+            for k in ("ocr_model_create_sec", "ocr_predict_sec", "ocr_save_sec"):
+                if info.get(k) is not None:
+                    out[k] = float(info[k])
+        except (ValueError, OSError):
+            pass
+    if "sam_total_sec" in out and "sam_inference_sec" in out:
+        # クライアント側の往復 - サービス側の推論 = 画像変換・転送・npz入出力の分
+        out["sam_overhead_sec"] = out["sam_total_sec"] - out["sam_inference_sec"]
+    if "gpu_peak_mb" in out and "gpu_baseline_mb" in out:
+        out["gpu_inference_mb"] = out["gpu_peak_mb"] - out["gpu_baseline_mb"]
+    (shot_dir / "timing.json").write_text(
+        json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _export_mask_shapes(shot_dir: Path) -> None:
@@ -174,15 +213,24 @@ def run_single_image_match(shot_dir: Path, master_json: str | None, sam_device: 
     if not rgb_path.exists():
         raise FileNotFoundError(f"{rgb_path} がありません")
 
+    # 2026-10-15: 処理時間の内訳を測る。区切りは get_book_points.py の [TIME] 行と同じ
+    # (capture / SAM total / OCR wall / merge OCR+SAM)にそろえてある。
+    t_load = time.perf_counter()
     color_np = cv2.imread(str(rgb_path))
     if color_np is None:
         raise FileNotFoundError(f"{rgb_path} を読み込めませんでした")
     depth_np_u16 = np.load(depth_path) if depth_path.exists() else None
+    image_load_sec = time.perf_counter() - t_load
 
     # ===== OCRを非同期開始 =====
+    # OCRはサブプロセスで先に走らせ、裏でSAM3を回す。ocr_wall_secはSAM3の実行時間を
+    # 含むので、sam_total_secと単純に足すと二重計上になる。
+    t_all = time.perf_counter()
+    ocr_start = t_all
     ocr_proc = start_ocr_subprocess(shot_dir)
 
     # ===== SAM3推論(画像につき1回だけ) =====
+    sam_start = time.perf_counter()
     sam_runner = _get_sam_runner_compat(
         encoder_path="", decoder_path="", sam_device=sam_device,
     )
@@ -191,11 +239,15 @@ def run_single_image_match(shot_dir: Path, master_json: str | None, sam_device: 
     masks, _sam_data = _infer_masks_compat(
         sam_runner, rgb_pil, stage_cfg, depth_np_u16=depth_np_u16,
     )
+    sam_total_sec = time.perf_counter() - sam_start
+    print(f"[TIME] SAM total     : {sam_total_sec:.3f} sec")
     print(f"[single_image_match_test] SAM3マスク数: {len(masks)}")
     _export_mask_shapes(shot_dir)
 
     # ===== OCR終了待ち =====
     ocr_stdout = wait_ocr_subprocess(ocr_proc, timeout=120.0)
+    ocr_wall_sec = time.perf_counter() - ocr_start
+    print(f"[TIME] OCR wall      : {ocr_wall_sec:.3f} sec")
     if ocr_stdout.strip():
         print(ocr_stdout, end="" if ocr_stdout.endswith("\n") else "\n")
 
@@ -206,12 +258,29 @@ def run_single_image_match(shot_dir: Path, master_json: str | None, sam_device: 
         raise RuntimeError("マスタが空です")
     dummy_query = master[0]["book_name"]  # target_j選択専用。all_assignmentsの内容には影響しない
 
+    match_start = time.perf_counter()
     match_text_to_mask_main(
         dummy_query, masks, shot_dir,
         master_json=master_json,
         save_all_assignments=True,
         save_all_perkey_overlays=True,
     )
+    match_sec = time.perf_counter() - match_start
+    total_sec = time.perf_counter() - t_all
+    print(f"[TIME] merge OCR+SAM : {match_sec:.3f} sec")
+    print(f"[TIME] total         : {total_sec:.3f} sec")
+
+    h, w = color_np.shape[:2]
+    _write_timing(shot_dir, {
+        "image_width": int(w),
+        "image_height": int(h),
+        "n_masks": int(len(masks)),
+        "image_load_sec": image_load_sec,
+        "sam_total_sec": sam_total_sec,
+        "ocr_wall_sec": ocr_wall_sec,
+        "match_sec": match_sec,
+        "total_sec": total_sec,
+    })
 
     debug = json.loads((shot_dir / "multikey_match_debug.json").read_text(encoding="utf-8"))
     all_assignments = debug["all_assignments"]
