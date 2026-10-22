@@ -37,7 +37,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RECO_ROOT = REPO_ROOT / "reco"
 sys.path.insert(0, str(REPO_ROOT))
 
-from catheter.scripts.multikey_matcher import match_text_to_mask_main, _load_master, DEFAULT_MASTER_JSON
+from catheter.scripts.multikey_matcher import (
+    match_text_to_mask_main, _load_master, DEFAULT_MASTER_JSON,
+    REJECT_LOW_SCORE, REJECT_RULE,
+)
 from detection.pro_handbook.sam_py_demo.get_book_points import (
     _get_sam_runner_compat,
     _make_stage_save_cfg_compat,
@@ -171,7 +174,12 @@ def _write_run_info(out_root: Path, *, target_desc: str, master_json: str | None
         for k, v in sorted(multikey_env.items()):
             lines.append(f"- 環境変数 {k}={v}")
     else:
-        lines.append("- 環境変数: MULTIKEY_*系は未設定(該当なし足切りはOFF)")
+        lines.append("- 環境変数: MULTIKEY_*系は未設定")
+    # 2026-10-21: 上の「環境変数が未設定か」だけでは実際の足切りON/OFFが分からなく
+    # なった(REJECT_LOW_SCOREの既定をOFF→ONに変更したため、未設定でもONになりうる)。
+    # 実際の値を直接記録する。
+    lines.append(f"- 該当なし足切り(REJECT_LOW_SCORE): {'ON' if REJECT_LOW_SCORE else 'OFF'} "
+                 f"(ルール: {REJECT_RULE})")
 
     try:
         head = subprocess.run(["git", "log", "-1", "--format=%h %ad", "--date=short"],

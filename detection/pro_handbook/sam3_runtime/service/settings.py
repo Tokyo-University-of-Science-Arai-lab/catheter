@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 RUNTIME_DIR = Path(__file__).resolve().parents[1]
-MODEL_PATH = Path(os.getenv("SAM3_MODEL_PATH", RUNTIME_DIR / "models" / "inference_best.pt"))
+MODEL_PATH = Path(os.getenv("SAM3_MODEL_PATH", RUNTIME_DIR / "models" / "inference_best.pt.bak_20260825_book"))
 HOST = os.getenv("SAM3_HOST", "127.0.0.1")
 PORT = int(os.getenv("SAM3_PORT", "8765"))
 PROMPT = os.getenv("SAM3_TEXT_PROMPT", "book spine")

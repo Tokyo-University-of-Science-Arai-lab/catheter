@@ -161,7 +161,39 @@ MULTIKEY_REJECT_LOW_SCORE=1 MULTIKEY_REJECT_RULE=ref_display_name python3 reco/s
 # 「リストにあるが画像に無い品目」「画像にあるがリストに無い品目」の実験結果は
 # 原因調査/しきい値足切り分析_20260926/ 参照
 
-###single_image_match_test.py（画像1枚 or フォルダ全部を、マスタ全品目×全マスクで一括対応付け。SAM3/OCRは画像につき1回だけ）
+
+
+
+
+
+
+##認識バッチ実行（no_depth_recognition.py、2026-10-06追加・2026-10-15更新）
+# depth_shots形式ではなく、ただのRGB画像(*.png)が並んだフォルダに対して
+# SAM3+OCR+multikey_matcherをバッチ実行する(解像度比較実験等で使用)。
+# SAM3サービスはこのスクリプトが自動で起動・終了する(事前にstart_service.shで
+# 手動起動しておく必要はない)。
+python -m catheter.scripts.no_depth_recognition \
+    --images-dir captures/resolution_test/4/1920x1080 \
+    --master-json Master_JSON/master_catheter_0911.json
+
+#   --images-dir (必須)  *.pngが並んだフォルダ
+#   --master-json         省略時はmultikey_matcher.pyの既定マスタ
+#   --sam-device           既定 "gpu"
+#   --out-dir               省略時は--images-dirの親に no_depth_reco_<フォルダ名>_<日時>/ を作る
+#   --keep-service          起動中のSAM3サービスをそのまま使い、終了時も停止しない
+#                           (既定は試験ごとに起動し直し、終了時に停止。計測条件をそろえるため)
+
+# 使うSAM3の重みを変えたい場合は、環境変数SAM3_MODEL_PATHをコマンドの前に付ける
+# (省略時は detection/pro_handbook/sam3_runtime/models/inference_best.pt)
+SAM3_MODEL_PATH=detection/pro_handbook/sam3_runtime/models/inference_catheter_0914.pt \
+    python -m catheter.scripts.no_depth_recognition --images-dir <画像フォルダ> --master-json <パス>
+
+# 結果は<out-dir>/work/<画像名>/、集計Excelは<out-dir>/直下に保存される
+
+###【古い・非推奨】no_depth_recognition_sequential.py は削除済み(2026-10-15頃)。
+# 同等の処理はno_depth_recognition.pyで行う
+
+###single_image_match_test.py（depth_shots形式の画像1枚 or フォルダ全部を、マスタ全品目×全マスクで一括対応付け。SAM3/OCRは画像につき1回だけ）
 # 1枚だけ
 python -m catheter.scripts.single_image_match_test --shot-dir reco/<データセット名>/depth_shots/<n> --master-json <パス>
 # depth_shots/の中身を全部(枚数固定なし、width_mm_validation.pyと同じ自動列挙)

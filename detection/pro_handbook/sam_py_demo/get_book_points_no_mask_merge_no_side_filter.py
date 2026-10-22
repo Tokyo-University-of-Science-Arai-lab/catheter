@@ -25,6 +25,7 @@ import pyrealsense2 as rs
 from PIL import Image, ImageDraw, ImageFont
 
 from . import get_book_points as current
+from .book_mask_postprocess import load_linked_ocr_polygons, postprocess_selected_mask
 from .modules.book_width import estimate_book_width
 from .modules.grip_point import find_target_point
 from .modules.pca_vector import pca_axes_fix_dir
@@ -32,6 +33,12 @@ from .modules.pointcloud_utils import save_ply_ascii
 
 
 VARIANT = "no_mask_merge_no_side_filter"
+
+# 2026-10-22: 先輩の書籍出納システムから飛び地除去(remove_islands)を移植。
+# USE_DUAL_ANGLE_OCR(get_book_points.py)と同じ方針で、カテーテル箱データでの
+# 検証前は既定を無効(False)にしておく。人間がオフライン比較(reco/データセット
+# でのIoU・幅誤差・認識成功率の前後比較)で確認した上でTrueに切り替える想定。
+SELECTED_MASK_POSTPROCESS_CONFIG = {"enabled": False, "method": "remove_islands"}
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CAPTURES_DIR = PROJECT_ROOT / "captures"
 SOURCE_SHOT_DIR = CAPTURES_DIR / "100test" / "1"
@@ -293,7 +300,17 @@ def run_capture_and_pca_offline_no_mask_merge_no_side_filter(
     # Comparison version:
     # legacy quality_filter / box-NMS / mask de-dup / merge_coaxial_rect_masks
     # and all later mask shape completion/refinement are intentionally skipped.
-    mask_used_for_depth = selected_mask.copy()
+    # 2026-10-22: 飛び地除去(remove_islands、先輩の書籍出納システムより移植)。
+    # 選択直後の生マスクに対してのみ適用し、既存のmask_used_for_depthへの他の
+    # 加工(帯補正後の_filter_small_components等)とは別物として扱う。
+    linked_ocr = load_linked_ocr_polygons(
+        shot_dir, selected_index, color_np.shape[:2]
+    )
+    postprocess_result = postprocess_selected_mask(
+        selected_mask, linked_ocr, SELECTED_MASK_POSTPROCESS_CONFIG
+    )
+    _write_json(shot_dir / "selected_mask_postprocess.json", postprocess_result.info)
+    mask_used_for_depth = postprocess_result.mask.copy()
     masks_equal = bool(np.array_equal(selected_mask, mask_used_for_depth))
 
     # OCR geometry is used only as the existing median-depth reference.

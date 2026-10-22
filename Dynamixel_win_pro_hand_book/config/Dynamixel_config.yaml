@@ -7,7 +7,7 @@ id:
 
 pos:
   gripper:
-    close: 3838
+    close: 1605 # 2026-10-08 電源再投入直後・全閉で確認（旧: 3838）。電源投入ごとに多回転カウントがずれる（-9909 ≡ 2379 mod 4096）
     range: 8190 # 4095*2, open: close + range
     release: 400
     theta_zero: 0.252680 # radian

@@ -71,8 +71,11 @@ except Exception:  # scipy が無い環境では貪欲法にフォールバッ�
 # ===== 設定 =====
 
 # マスタJSON。呼び出し時に master_json= で上書きできる。
+# 2026-10-22: 実機取り出しの本番既定を、今週の試験・改良で検証済みの0911版に統一
+# (以前の既定master_catheter_20260216.json→master_catheter_reco.jsonは30件で、
+# 今週の検証(33件、0911版)とは別物だった)。
 DEFAULT_MASTER_JSON = (
-    Path(__file__).resolve().parents[2] / "Master_JSON" / "master_catheter_20260216.json"
+    Path(__file__).resolve().parents[2] / "Master_JSON" / "master_catheter_0911.json"
 )
 
 # 低信頼のOCR断片はゴミ文字になりやすいので落とす
@@ -95,8 +98,9 @@ LEGACY_MODE = os.environ.get("MULTIKEY_LEGACY", "") == "1"
 # 押し込まないようにする。既定は無効で、無指定なら挙動は一切変わらない。
 DROP_ZERO_ASSIGN = os.environ.get("MULTIKEY_DROP_ZERO", "") == "1"
 
-# しきい値未満の対応を「該当なし」として棄却する（比較実験用）:
-# 環境変数 MULTIKEY_REJECT_LOW_SCORE=1 で有効。
+# しきい値未満の対応を「該当なし」として棄却する:
+# 2026-10-19、ユーザー要望により既定を有効(ON)に変更。無効にしたい場合のみ
+# 環境変数 MULTIKEY_REJECT_LOW_SCORE=0 を指定する。
 # ハンガリー法は行列の形状で挙動が変わる: マスク数がマスタ品目数より多いと、
 # マスタの全品目が必ずどれかのマスクへ割り当てられる。逆にマスタの方が多いと、
 # 割当から漏れた品目は「割当」節の独立argmaxフォールバックがスコアを問わず
@@ -109,8 +113,7 @@ DROP_ZERO_ASSIGN = os.environ.get("MULTIKEY_DROP_ZERO", "") == "1"
 # 注意: スコアSは raw_sum なら5キー合計(最大500点)で、既定のthreshold=40は
 # 0〜100点尺度の名残のためほぼ効かない(reco/0911で選択マスクS<40は201件中2件、
 # どちらもS=0)。実際に使うときは呼び出し側でthresholdを尺度に合わせて渡すこと。
-# 既定は無効で、無指定なら挙動は一切変わらない。
-REJECT_LOW_SCORE = os.environ.get("MULTIKEY_REJECT_LOW_SCORE", "") == "1"
+REJECT_LOW_SCORE = os.environ.get("MULTIKEY_REJECT_LOW_SCORE", "1") != "0"
 
 # 足切りに使うスコアの種類: 環境変数 MULTIKEY_REJECT_RULE (既定"sum")。
 # 2026-09-26にreco/0911で検証した結果、5キー合計(S)は「映っていない品目」を見分けられない
@@ -190,6 +193,51 @@ def _normalize(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip().upper()
 
 
+def _normalize_with_map(s: str) -> tuple[str, list[int]]:
+    """_normalizeと同じ正規化をしつつ、出力の各文字が元の文字列sの何文字目から
+    来たかを対応表(idx_map)として返す(idx_map[i] = 正規化後i文字目の、s内の位置)。
+
+    2026-10-16追加: REF/商品名の照合(fuzz.partial_ratio)で実際に一致した範囲を
+    combined(正規化前)側の位置として求めるために必要(_consumed_span_for_ref_or_name
+    参照)。NFKCは文字によって複数文字に展開されることがあるため、1文字ずつ
+    NFKC正規化してから結合することで、展開後の各文字がsのどの位置由来かを追える
+    ようにしている(文字列全体を一度にNFKC正規化する_normalizeとは展開結果が
+    理論上ズレうるが、本プロジェクトのOCRテキスト(英数字主体)では実質的に
+    差が出ない)。
+    """
+    if not s:
+        return "", []
+    chars: list[str] = []
+    idx_map: list[int] = []
+    special = {"®", "™", "©"}
+    for i, ch in enumerate(s):
+        for nc in unicodedata.normalize("NFKC", ch):
+            if nc in special:
+                continue
+            chars.append(nc)
+            idx_map.append(i)
+
+    out_chars: list[str] = []
+    out_idx: list[int] = []
+    prev_space = False
+    for ch, oi in zip(chars, idx_map):
+        if ch.isspace():
+            if prev_space or not out_chars:
+                prev_space = True
+                continue
+            out_chars.append(" ")
+            out_idx.append(oi)
+            prev_space = True
+        else:
+            out_chars.append(ch.upper())
+            out_idx.append(oi)
+            prev_space = False
+    while out_chars and out_chars[-1] == " ":
+        out_chars.pop()
+        out_idx.pop()
+    return "".join(out_chars), out_idx
+
+
 def _digits_only(s: str) -> str:
     return re.sub(r"\D", "", s or "")
 
@@ -232,6 +280,137 @@ def _extract_value_unit_pairs(s: str) -> list[tuple[float, str]]:
     return pairs
 
 
+# 2026-10-16: spec(size)の数値抽出から、日付・REFコードらしい並びに含まれる数字を
+# 除外するためのパターン。実例2件(いずれも2026-10-12のユーザーとの原因分析で発覚):
+#   1. 日付「2029-03-31」の月(03=3.0)が、SHIDENのSPEC_1「3.0 mm」と誤って一致
+#   2. REFコード「SS2-40-070H」の40が、SHIDENのSPEC_2「40 mm」と誤って一致
+# 詳細はHANDOFF_20261012_spec_numeric_false_match_todo.md参照。
+# 2026-10-16: 当初は_key_scoreのis_date分岐と同じ緩い正規表現(\d[\d\-/.]{5,})を
+# 流用していたが、"3.2/3.4Fr."(KMDA044178自身の正しいspec値)まで日付っぽい並びと
+# 誤認識して消してしまう回帰が見つかった(実データでの回帰確認により判明)。
+# 西暦4桁で始まる並びだけに絞ることで、このような短い数値表記を誤って巻き込まない
+# ようにする(この項目の実例の日付「2029-03-31」「2029-01」はどちらも対象のまま)。
+_DATE_LIKE_RE = re.compile(r"\d{4}[\-/.]\d{1,2}(?:[\-/.]\d{1,2})?")
+# ハイフンで挟まれた英数字コードらしい並び(REFコード等)。
+# 「2-3」のような範囲表記のspec値(例: 393-020310のSPEC_1="2-3 mm")を誤って除外
+# しないよう、アルファベットを1文字も含まない(=純粋な数字の範囲)場合は対象外にする。
+_HYPHENATED_CODE_RE = re.compile(r"[A-Za-z0-9]+-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
+
+
+def _mask_date_and_refcode_spans(s: str) -> str:
+    """specの数値抽出対象から、日付らしい並び・REFコードらしい並びをスペースに
+    置き換えて除外する(文字数・位置は変えないので、他の処理への影響は無い)。"""
+    out = list(s)
+    for m in _DATE_LIKE_RE.finditer(s):
+        for i in range(m.start(), m.end()):
+            out[i] = " "
+    for m in _HYPHENATED_CODE_RE.finditer(s):
+        if not re.search(r"[A-Za-z]", m.group(0)):
+            continue
+        for i in range(m.start(), m.end()):
+            out[i] = " "
+    return "".join(out)
+
+
+# 2026-10-16: REF/商品名/使用期限のスコア計算で実際に使われた範囲を、sizeの
+# 採点前にcombinedから除外する(ユーザー提案)。_mask_date_and_refcode_spansが
+# 「日付・REFコードっぽい形」を機械的に検出するのに対し、こちらは「このマスク×
+# このマスタ品目の組み合わせで、実際にREF/商品名/期限として一致した場所」を
+# 直接特定する。両方を併用する。
+# 低スコアの偶然の一致まで除外すると実害があるため、スコアがこの値以上の
+# ときだけ「実際に使われた」とみなす。
+# 2026-10-16、実データでの回帰確認により50点では緩すぎると判明: REFの
+# fuzz.partial_ratioがバーコードの無関係な数字列に対してたまたま50点を
+# 出し、その範囲をマスクしたことで残った断片("06970908212826"の一部等)が
+# 別の品目のspec値と偶然一致する新しい誤マッチが58件発生した。90点まで
+# 上げたところ、残った数件は逆に「REFコード直後の数字が、REFの文字列を
+# 単位と誤認識して0点になっていたのが、REFをマスクすることで正しく
+# 救済される」という正しい修正だった(例: XT275081自身の箱で、"150"の
+# 直後の"XT275081"が単位"xt"として誤って拾われていたのが解消された)。
+MASK_CONSUME_MIN_SCORE = 90.0
+
+
+def _consumed_span_for_ref_or_name(
+    key: str, combined_norm: str, idx_map: list[int],
+) -> tuple[int, int] | None:
+    """REF/商品名のfuzz.partial_ratioで実際に一致した範囲を、combined(正規化前)
+    での位置として返す。一致が無い/短すぎる場合はNone。"""
+    key_norm = _normalize(key)
+    if min(len(key_norm), len(combined_norm)) < MIN_KEY_TEXT_LEN_FOR_MATCH:
+        return None
+    align = fuzz.partial_ratio_alignment(key_norm, combined_norm)
+    if align is None or align.dest_end <= align.dest_start:
+        return None
+    orig_start = idx_map[align.dest_start]
+    orig_end = idx_map[align.dest_end - 1] + 1
+    return orig_start, orig_end
+
+
+def _consumed_span_for_date(key: str, combined: str) -> tuple[int, int] | None:
+    """日付の採点で実際に最も高いスコアを出した候補の、combined内の位置を返す
+    (_key_scoreのis_date分岐と同じロジックで候補を探す)。"""
+    k = _digits_only(key)
+    if len(k) < 6:
+        return None
+    combined_for_date = re.sub(r"\s*[年月日]\s*", "-", combined)
+    if len(combined_for_date) != len(combined):
+        # 年月日の置換で長さが変わると位置が合わなくなるため、その場合は
+        # 置換前の文字列で候補を探す(年月日混在の日付はここでは拾えなくなるが、
+        # 安全側に倒す)。
+        combined_for_date = combined
+    best_span, best_score = None, -1.0
+    for m in re.finditer(r"\d[\d\-/.]{5,}", combined_for_date):
+        c = _digits_only(m.group(0))
+        if len(c) < 6:
+            continue
+        score = fuzz.ratio(k, c)
+        if score > best_score:
+            best_score, best_span = score, (m.start(), m.end())
+    return best_span
+
+
+def _mask_spans(s: str, spans: list[tuple[int, int]]) -> str:
+    """spansで指定された範囲をスペースに置き換える(文字数・位置は変えない)。"""
+    if not spans:
+        return s
+    out = list(s)
+    n = len(out)
+    for start, end in spans:
+        for i in range(max(0, start), min(end, n)):
+            out[i] = " "
+    return "".join(out)
+
+
+def _score_keys(keys_of_entry: list[tuple[str, str, bool, bool]], combined: str) -> list[float]:
+    """1つの(マスク, マスタ品目)ペアについて、_keys_of()の5項目を順番に採点する。
+
+    REF→商品名→使用期限→spec_1→spec_2 の順(_keys_of()の並びそのもの)で処理し、
+    REF/商品名/使用期限で実際に使われた範囲(スコアがMASK_CONSUME_MIN_SCORE以上の
+    場合のみ)を、それより後のspec採点のcombinedから除外していく。
+    """
+    combined_norm, idx_map = _normalize_with_map(combined)
+    consumed_spans: list[tuple[int, int]] = []
+    scores: list[float] = []
+    for _, key, is_date, is_numeric in keys_of_entry:
+        if is_numeric:
+            masked = _mask_spans(combined, consumed_spans)
+            scores.append(_key_score(key, masked, is_numeric=True))
+            continue
+
+        score = _key_score(key, combined, is_date=is_date, is_numeric=is_numeric)
+        scores.append(score)
+
+        if score >= MASK_CONSUME_MIN_SCORE:
+            span = (
+                _consumed_span_for_date(key, combined)
+                if is_date
+                else _consumed_span_for_ref_or_name(key, combined_norm, idx_map)
+            )
+            if span is not None:
+                consumed_spans.append(span)
+    return scores
+
+
 def _key_score(key: str, combined: str, *, is_date: bool = False, is_numeric: bool = False) -> float:
     """
     1キーに対するスコア（0〜100）。
@@ -270,7 +449,10 @@ def _key_score(key: str, combined: str, *, is_date: bool = False, is_numeric: bo
         key_pairs = _extract_value_unit_pairs(key)
         if not key_pairs:
             return 0.0
-        combined_pairs = _extract_value_unit_pairs(combined)
+        # 2026-10-16: 日付・REFコードらしい並びに含まれる数字を候補から除外してから
+        # 抽出する(_mask_date_and_refcode_spans参照)。keyはマスタの信頼できる値
+        # なのでマスクしない。
+        combined_pairs = _extract_value_unit_pairs(_mask_date_and_refcode_spans(combined))
         if not combined_pairs:
             return 0.0
         best = 0.0
@@ -319,7 +501,18 @@ def _mask_bbox(mask_bin: np.ndarray) -> dict[str, float] | None:
     }
 
 
-def _poly_mask_overlap_ratio(poly_pts: np.ndarray, mask_bin: np.ndarray, h: int, w: int) -> float:
+def _bbox_overlap(
+    ax1: float, ay1: float, ax2: float, ay2: float,
+    bx1: float, by1: float, bx2: float, by2: float,
+) -> bool:
+    """2つの矩形(x1,y1,x2,y2)が重なるか。重ならなければ実ピクセルの重なりも必ず0。"""
+    return ax1 <= bx2 and ax2 >= bx1 and ay1 <= by2 and ay2 >= by1
+
+
+def _poly_mask_overlap_ratio(
+    poly_pts: np.ndarray, mask_bin: np.ndarray, h: int, w: int,
+    poly_bbox: tuple[float, float, float, float] | None = None,
+) -> float:
     """OCR文字ポリゴンの面積のうち、実際のマスク輪郭(ピクセル単位)と重なる割合。
 
     2026-08-21: 従来は矩形バウンディングボックス同士の重なりで判定していたが、
@@ -328,14 +521,32 @@ def _poly_mask_overlap_ratio(poly_pts: np.ndarray, mask_bin: np.ndarray, h: int,
     DACのテキストバケットに"ESC0305"が混入し、confident=Trueで誤選択)。矩形では
     なく実際のマスク輪郭との重なりで判定することで、傾いた隣接マスク同士が
     矩形上は重なっていても実体(輪郭)は重ならない場合に正しく区別できる。
+
+    2026-10-16: 画像全体(h×w)ではなく、文字ポリゴンの外接矩形の範囲だけで計算する
+    (性能改善、pro-book-aa提案)。ポリゴンはその外接矩形の外には絶対に出ないため、
+    範囲を切り出しても結果は変わらない(整数だけの平行移動なのでnp.roundの結果も
+    不変)。呼び出し側で外接矩形を既に計算済みならpoly_bboxで渡すと再計算を省ける。
     """
-    canvas = np.zeros((h, w), dtype=np.uint8)
-    pts_int = np.round(poly_pts).astype(np.int32).reshape(-1, 1, 2)
+    if poly_bbox is not None:
+        x1, y1, x2, y2 = poly_bbox
+    else:
+        x1, y1 = float(poly_pts[:, 0].min()), float(poly_pts[:, 1].min())
+        x2, y2 = float(poly_pts[:, 0].max()), float(poly_pts[:, 1].max())
+    cx1, cy1 = max(0, int(np.floor(x1))), max(0, int(np.floor(y1)))
+    cx2, cy2 = min(w, int(np.ceil(x2)) + 1), min(h, int(np.ceil(y2)) + 1)
+    if cx2 <= cx1 or cy2 <= cy1:
+        return 0.0
+    canvas = np.zeros((cy2 - cy1, cx2 - cx1), dtype=np.uint8)
+    pts_shifted = poly_pts.copy()
+    pts_shifted[:, 0] -= cx1
+    pts_shifted[:, 1] -= cy1
+    pts_int = np.round(pts_shifted).astype(np.int32).reshape(-1, 1, 2)
     cv2.fillPoly(canvas, [pts_int], 1)
     poly_area = int(canvas.sum())
     if poly_area <= 0:
         return 0.0
-    inter = int(np.count_nonzero((canvas > 0) & (mask_bin > 0)))
+    mask_crop = mask_bin[cy1:cy2, cx1:cx2]
+    inter = int(np.count_nonzero((canvas > 0) & (mask_crop > 0)))
     return inter / poly_area
 
 
@@ -353,6 +564,91 @@ def _unrotate_poly(poly, angle: int, w: int, h: int) -> np.ndarray:
     else:
         xo, yo = x, y
     return np.stack([xo, yo], axis=1)
+
+
+# 2026-10-16: 数値の直後に来るべき単位として扱う、短い文字列のホワイトリスト。
+# マスタのSPEC_1/SPEC_2に実際に出てくる単位に絞る(例: "0.046 in"、"3.2/3.4Fr."等)。
+# 範囲を広げすぎると("TM"のような無関係な短い英字も該当しうる)誤爆のリスクが
+# 増えるため、意図的に狭く絞ってある。
+_UNIT_WHITELIST = {"mm", "cm", "in", "fr", "f"}
+
+
+def _looks_like_bare_value(text: str) -> bool:
+    """単位を伴わない、数字(整数/小数)だけの文字列か。"""
+    return bool(re.fullmatch(r"\d+(?:\.\d+)?", text.strip()))
+
+
+def _looks_like_bare_unit(text: str) -> bool:
+    """_UNIT_WHITELISTに含まれる、単位だけの短い文字列か。"""
+    return text.strip().rstrip(".").lower() in _UNIT_WHITELIST
+
+
+def _order_bucket_texts(items: list[tuple[float, float, float, str]]) -> str:
+    """1つのマスクに帰属したOCR文字を、読み順に並べて結合する。
+
+    2026-10-16追加: 数値と単位が別々のOCR文字列として離れて検出され、読み順
+    (Y座標)がたまたま遠く離れてしまう問題への対応
+    (詳細はHANDOFF_20261012_ocr_two_row_order_todo.md)。
+
+    当初は「2段ラベル全体をX座標で行分けする」案を試したが、実データ
+    (10CSW01515)で検証したところ、背表紙が細いため本体の品名文字列も
+    spec表の数字もほぼ同じX範囲に収まってしまい、行として切り分けられなかった
+    (2026-10-16、実データでの検証により判明)。そのため、2段表全体を解析する
+    のではなく、**数値のすぐ近く(Y座標がとても近い)に単位らしい短い文字列が
+    あれば、その2つだけをペアにして隣接させる**という、局所的な対策に絞った。
+
+    手順:
+    1. 通常通りY座標降順で全文字列を並べる(既存の挙動そのまま)
+    2. 数字だけの文字列(値)と、単位らしい短い文字列(_UNIT_WHITELIST)を洗い出す
+    3. Y座標が、両者の文字の高さから見て明らかに近い(他の単語同士の間隔より
+       ずっと近い)もの同士を、距離が近い順に貪欲に1対1でペアにする
+    4. ペアになった単位は元の位置から外し、対応する値の直後に挿入し直す
+
+    1行のみの通常ケースや、対象となる値・単位の組が無いケースでは、
+    これまでと全く同じ挙動になる。
+    """
+    if len(items) <= 1:
+        return " ".join(t for *_, t in items)
+
+    # 旧実装は(-Y, text)のタプルをsortedに渡していたため、Yが同値の場合は
+    # textの辞書順でタイブレークされていた。挙動を完全に保つため、ここでも
+    # 同じタイブレーク規則にする(単にkey=...,reverse=Trueにすると、Y同値時に
+    # OCR検出順でタイブレークされてしまい、挙動が変わる)。
+    ordered = sorted(items, key=lambda it: (-it[2], it[3]))
+
+    value_idxs = [i for i, it in enumerate(ordered) if _looks_like_bare_value(it[3])]
+    unit_idxs = [i for i, it in enumerate(ordered) if _looks_like_bare_unit(it[3])]
+
+    candidates = []
+    for vi in value_idxs:
+        v_y, v_h = ordered[vi][2], ordered[vi][1]
+        for ui in unit_idxs:
+            u_y, u_h = ordered[ui][2], ordered[ui][1]
+            dist = abs(v_y - u_y)
+            threshold = (v_h + u_h) / 2.0 * 0.5
+            if dist < threshold:
+                candidates.append((dist, vi, ui))
+    candidates.sort(key=lambda c: c[0])
+
+    pair_for_value: dict[int, int] = {}
+    used_values: set[int] = set()
+    used_units: set[int] = set()
+    for dist, vi, ui in candidates:
+        if vi in used_values or ui in used_units:
+            continue
+        pair_for_value[vi] = ui
+        used_values.add(vi)
+        used_units.add(ui)
+
+    skip_idxs = set(pair_for_value.values())
+    parts: list[str] = []
+    for i, it in enumerate(ordered):
+        if i in skip_idxs:
+            continue
+        parts.append(it[3])
+        if i in pair_for_value:
+            parts.append(ordered[pair_for_value[i]][3])
+    return " ".join(parts)
 
 
 def _collect_mask_texts(
@@ -383,7 +679,7 @@ def _collect_mask_texts(
     mask_bins = [_mask_to_binary(m, h, w) for m in masks]
     boxes = [_mask_bbox(mb) for mb in mask_bins]
 
-    buckets: list[list[tuple[float, str]]] = [[] for _ in masks]
+    buckets: list[list[tuple[float, float, float, str]]] = [[] for _ in masks]
     debug: list[dict] = []
 
     for idx, (poly, text, sc) in enumerate(zip(polys, texts, scores), start=1):
@@ -401,19 +697,29 @@ def _collect_mask_texts(
         # 文字ポリゴンの面積のうち、どのマスクの実際の輪郭(ピクセル単位)に
         # 最も多く重なるかで帰属を決める(矩形バウンディングボックスではない。
         # 理由は_poly_mask_overlap_ratioのdocstring参照)。
+        # 2026-10-16: マスクの外接矩形(boxes、384行目で計算済み)と文字の外接矩形が
+        # そもそも重ならない組は、実ピクセルの重なりも必ず0なので計算自体を省く
+        # (性能改善、pro-book-aa提案)。
         best_i, best_ratio = None, 0.0
         for i, mb in enumerate(mask_bins):
-            ratio = _poly_mask_overlap_ratio(p, mb, h, w)
+            box = boxes[i]
+            if box is None:
+                continue
+            if not _bbox_overlap(x1, y1, x2, y2, box["x1"], box["y1"], box["x2"], box["y2"]):
+                continue
+            ratio = _poly_mask_overlap_ratio(p, mb, h, w, poly_bbox=(x1, y1, x2, y2))
             if ratio > best_ratio:
                 best_ratio, best_i = ratio, i
 
         if best_i is not None and best_ratio > 0:
-            # 読み順キー。
+            # 読み順。
             # 本番のOCR入力は rotate90CW(after_init_rgb) なので base_x = h-1-y。
-            # つまり base 上の左→右は、本番画像座標では y の降順にあたる。
-            # 昇順にすると 'pNOVUS17 ... 150' が '150 ... pNOVUS17' と反転し、
-            # 連続部分列を見る partial_ratio のスコアが落ちる（実測 76.9 → 66.7）。
-            buckets[best_i].append((-(y1 + y2) / 2.0, text))
+            # つまり base 上の左→右は、本番画像座標では y の降順にあたる(行内の順)。
+            # 元画像のX座標は「どの行か」に対応する(_order_bucket_texts参照)。
+            x_center = (x1 + x2) / 2.0
+            x_height = x2 - x1
+            y_avg = (y1 + y2) / 2.0
+            buckets[best_i].append((x_center, x_height, y_avg, text))
             debug.append({
                 "ocr_index": idx, "text": text,
                 "matched": f"mask_{best_i + 1}", "overlap_ratio": round(best_ratio, 3),
@@ -421,7 +727,7 @@ def _collect_mask_texts(
         else:
             debug.append({"ocr_index": idx, "text": text, "matched": None, "overlap_ratio": 0.0})
 
-    combined = [" ".join(t for _, t in sorted(b)) for b in buckets]
+    combined = [_order_bucket_texts(b) for b in buckets]
     return combined, boxes, debug
 
 
@@ -923,8 +1229,7 @@ def match_text_to_mask_main(
     for i in range(n_mask):
         c = combined[i]
         for j, m in enumerate(master):
-            for k, (_, key, is_date, is_numeric) in enumerate(_keys_of(m)):
-                per_key[i, j, k] = _key_score(key, c, is_date=is_date, is_numeric=is_numeric)
+            per_key[i, j, :] = _score_keys(_keys_of(m), c)
 
     centered = np.zeros_like(per_key)
     for j in range(n_master):
